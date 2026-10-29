@@ -2,7 +2,7 @@
 
 Customer portal and staff app for Wheelhouse consignments sold through Fanatics Collect and PC Sportscards.
 
-- **wheelhousecards.github.io** is the customer portal. Customers sign in with an emailed link and see only their own cards, batches and photos.
+- **wheelhousecards.github.io** is the customer portal. Customers sign in with email and password and see only their own cards, batches and photos.
 - **wheelhousecards.github.io/staff.html** is the staff app. You add consignors, listings and batches, import spreadsheets, and bulk edit there.
 
 The site is plain HTML and JavaScript hosted on GitHub Pages. Data lives in Firebase (Firestore). Sign-in is email and password. Each account verifies its email once, so nobody can create an account with someone else’s email and see their cards. Everything runs on Firebase’s free (Spark) plan.
