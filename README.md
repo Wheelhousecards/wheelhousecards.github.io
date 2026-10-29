@@ -2,8 +2,8 @@
 
 Customer portal and staff app for Wheelhouse consignments sold through Fanatics Collect and PC Sportscards.
 
-- **wheelhouseconsignment.github.io** is the customer portal. Customers sign in with an emailed link and see only their own cards, batches and photos.
-- **wheelhouseconsignment.github.io/staff.html** is the staff app. You add consignors, listings and batches, import spreadsheets, and bulk edit there.
+- **wheelhousecards.github.io** is the customer portal. Customers sign in with an emailed link and see only their own cards, batches and photos.
+- **wheelhousecards.github.io/staff.html** is the staff app. You add consignors, listings and batches, import spreadsheets, and bulk edit there.
 
 The site is plain HTML and JavaScript hosted on GitHub Pages. Data lives in Firebase (Firestore). Sign-in is email and password. Each account verifies its email once, so nobody can create an account with someone else’s email and see their cards. Everything runs on Firebase’s free (Spark) plan.
 
@@ -15,7 +15,7 @@ The site is plain HTML and JavaScript hosted on GitHub Pages. Data lives in Fire
 3. **Build → Firestore Database → Create database.** Choose a US location (it can't be changed later) and start in **production mode**.
 4. Open the **Rules** tab, replace everything with the contents of `firestore.rules`, and click **Publish**.
 5. **Build → Authentication → Get started → Sign-in method → Email/Password.** Turn on **Email/Password**, leave **Email link** off, and save.
-6. **Authentication → Settings → Authorized domains → Add domain:** `wheelhouseconsignment.github.io`.
+6. **Authentication → Settings → Authorized domains → Add domain:** `wheelhousecards.github.io`.
 7. **Project settings (gear) → General → Public-facing name:** `Wheelhouse Consignment`. This is the name customers see on sign-in emails.
 8. **Project settings → Your apps → Web (</>)** → register an app called `consignment` (skip Firebase Hosting). Copy the `firebaseConfig` values into `assets/firebase-config.js`.
 9. Also in `assets/firebase-config.js`, fill in `contact.email` and `contact.phone`. Customers who sign in without an account see these.
@@ -26,12 +26,12 @@ The staff list starts empty, so add yourself by hand once:
 After that, add other employees from the **Staff access** panel at the bottom of the staff app.
 
 ### 3. GitHub Pages
-1. Create a free GitHub organization named `wheelhouseconsignment` (github.com/organizations/plan → Free).
-2. In that organization, create a public repo named exactly `wheelhouseconsignment.github.io` and push this folder to it.
+1. Create a free GitHub organization named `wheelhousecards` (github.com/organizations/plan → Free).
+2. In that organization, create a public repo named exactly `wheelhousecards.github.io` and push this folder to it.
 3. Repo **Settings → Pages** → Source: **Deploy from a branch** → `main` / `(root)` → Save.
-4. The site goes live at https://wheelhouseconsignment.github.io within a few minutes. HTTPS is on automatically.
+4. The site goes live at https://wheelhousecards.github.io within a few minutes. HTTPS is on automatically.
 
-To move to a custom domain later (for example consign.wheelhousecards.com), add it under Settings → Pages → Custom domain, point a CNAME record at `wheelhouseconsignment.github.io`, and add the domain to Firebase's authorized domains.
+To move to a custom domain later (for example consign.wheelhousecards.com), add it under Settings → Pages → Custom domain, point a CNAME record at `wheelhousecards.github.io`, and add the domain to Firebase's authorized domains.
 
 ## How data is organized (Firestore)
 
