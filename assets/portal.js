@@ -9,7 +9,7 @@ const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
 
 $("#gate").innerHTML = gateMarkup("See your consigned cards",
-  "Enter the email you gave Wheelhouse when you dropped off your cards. We’ll email you a link to sign in. No password needed.");
+  "Sign in with the email you gave Wheelhouse when you dropped off your cards. First time here? Choose “Create account” and use that same email.");
 
 let unsubs = [], state = { customer: null, listings: [], batches: [] }, me = "";
 const dash = mountDashboard($("#dash"));

@@ -1,7 +1,8 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, connectAuthEmulator, onAuthStateChanged, signOut,
-  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  sendEmailVerification, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, connectFirestoreEmulator
@@ -23,28 +24,22 @@ if (local) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
 }
 
-const EMAIL_KEY = "wh-signin-email";
+const back = () => ({ url: location.origin + location.pathname });
 
-export function sendLoginLink(email) {
-  const url = location.origin + location.pathname;
-  try { localStorage.setItem(EMAIL_KEY, email); } catch (e) {}
-  return sendSignInLinkToEmail(auth, email, { url, handleCodeInApp: true });
-}
-
-export function hasLoginLink() {
-  return isSignInWithEmailLink(auth, location.href);
-}
-
-export function savedLoginEmail() {
-  try { return localStorage.getItem(EMAIL_KEY) || ""; } catch (e) { return ""; }
-}
-
-export async function finishLoginLink(email) {
-  const cred = await signInWithEmailLink(auth, email, location.href);
-  try { localStorage.removeItem(EMAIL_KEY); } catch (e) {}
-  history.replaceState(null, "", location.pathname);
+export const signIn = (email, pw) => signInWithEmailAndPassword(auth, email, pw);
+export async function signUp(email, pw) {
+  const cred = await createUserWithEmailAndPassword(auth, email, pw);
+  await sendEmailVerification(cred.user, back());
   return cred;
 }
-
+export const resendVerification = () => auth.currentUser ? sendEmailVerification(auth.currentUser, back()) : Promise.resolve();
+export const resetPassword = email => sendPasswordResetEmail(auth, email, back());
+// After the customer clicks the verification link, refresh so the new "verified" status reaches the database rules.
+export async function refreshUser() {
+  const u = auth.currentUser; if (!u) return null;
+  await u.reload();
+  if (auth.currentUser.emailVerified) await auth.currentUser.getIdToken(true);
+  return auth.currentUser;
+}
 export function watchAuth(cb) { return onAuthStateChanged(auth, cb); }
 export function logout() { return signOut(auth); }

@@ -68,7 +68,7 @@ const listingRef = id => doc(db, "listings", id);
 const upd = (id, data) => ["update", listingRef(id), { ...data, updatedAt: serverTimestamp() }];
 
 /* ---------- auth ---------- */
-$("#gate").innerHTML = gateMarkup("Staff sign in", "Use your Wheelhouse staff email. We’ll email you a link to sign in.");
+$("#gate").innerHTML = gateMarkup("Staff sign in", "Use the email that’s on the Wheelhouse staff list. First time here? Choose “Create account” with that email.");
 setupGate($("#gate"), async user => {
   unsubs.forEach(u => u()); unsubs = []; ready.clear();
   if (!user) { $("#acct").hidden = true; $("#modes").hidden = true; show("gate"); return; }
