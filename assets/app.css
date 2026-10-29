@@ -152,3 +152,8 @@ img{max-width:100%}
 .staff-mgr{display:grid;gap:6px}
 .staff-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 9px;border:1px solid var(--line);border-radius:6px;overflow-wrap:anywhere}
 footer{padding-block:24px 40px;color:var(--muted);font-size:12px;text-align:center}
+.notice{display:grid;gap:4px;padding:12px 14px;border-radius:8px;border:1px solid var(--line);background:var(--sunk);font-size:13px;line-height:1.5}
+.notice b{font-family:var(--display);font-weight:600;font-size:16px;letter-spacing:.03em;text-transform:uppercase}
+.notice.curating b,.notice.partial b{color:var(--sold)}
+.notice.prep b{color:var(--paid)}
+.notice ul{margin:4px 0 0;padding-left:18px;display:grid;gap:2px}

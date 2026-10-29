@@ -108,6 +108,18 @@ export function createLightbox(getBatch, loadFull) {
   return { forget: id => cache.delete(id) };
 }
 
+/* ---------- batch progress, as the customer sees it ---------- */
+// Fanatics and PC Sportscards can take a long time to curate and list a shipment,
+// so a shipped batch with cards still unlisted gets a reassuring status instead of looking empty.
+export function batchStage(b, cards) {
+  const sent = b.cards || 0, listed = cards.length, where = PLAT[b.plat];
+  if (!b.ship) return { k: "prep", title: "Getting ready to ship", text: `Your cards are safe at Wheelhouse. We’re preparing this batch to send to ${where}.` };
+  if (!listed) return { k: "curating", title: `Being curated by ${where}`, text: `We shipped your cards on ${fmtDay(b.ship)}. ${where} is reviewing and photographing them before they go up for sale, which can take a while. Your cards will show up here as soon as they’re listed.` };
+  if (sent && listed < sent) return { k: "partial", title: `${sent - listed} still being curated`, text: `${listed} of ${sent} cards are listed. ${where} is still working through the rest, and they’ll show up here as they’re listed.` };
+  return null;
+}
+const stageHtml = s => s ? `<div class="notice ${s.k}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></div>` : "";
+
 /* ---------- customer dashboard ---------- */
 export function dashboardMarkup(pickerHtml = "") {
   return `
@@ -168,6 +180,7 @@ export function mountDashboard(root, pickerHtml) {
           <div style="display:grid;gap:8px;min-width:0">
             <div class="t">Batch <span class="code">${esc(b.id)}</span> <span class="chip ${b.plat}">${PLAT[b.plat]}</span></div>
             <div class="meta"><span>Received ${fmtDay(b.recv)}</span><span>${b.ship ? "Shipped " + fmtDay(b.ship) : '<span class="need">Not shipped yet</span>'}</span><span>${b.cards || cards.length} cards sent · ${cards.length} listed · ${sold.length} sold</span></div>
+            ${stageHtml(batchStage(b, cards))}
             ${thumbsHtml(b, 8)}
           </div>
           <div class="right"><span class="sub">Live value</span><span class="amt">${money(lv.reduce((s, l) => s + (l.price || 0), 0))}</span><span class="sub">${lv.length} live now</span></div>
@@ -175,12 +188,26 @@ export function mountDashboard(root, pickerHtml) {
       }).join("") : '<div class="empty">No batches logged yet.</div>';
       return;
     }
+    // Shipped batches that aren't fully listed yet, summarized above the card list.
+    const waiting = batches.filter(b => b.ship && (!fp || b.plat === fp)).map(b => {
+      const n = mine.filter(l => l.batch === b.id).length, s = batchStage(b, mine.filter(l => l.batch === b.id));
+      return s ? { b, s, left: b.cards ? Math.max(0, b.cards - n) : null } : null;
+    }).filter(Boolean);
+    const prep = batches.filter(b => !b.ship && (!fp || b.plat === fp));
+    let banner = "";
+    if (tab !== "sold" && (waiting.length || prep.length)) {
+      const lines = [
+        ...waiting.map(({ b, left }) => `${left != null ? `${left} card${left === 1 ? "" : "s"}` : "Cards"} from batch <span class="code">${esc(b.id)}</span> ${left === 1 ? "is" : "are"} being curated by ${PLAT[b.plat]} (shipped ${fmtDay(b.ship)}).`),
+        ...prep.map(b => `Batch <span class="code">${esc(b.id)}</span> is at Wheelhouse getting ready to ship to ${PLAT[b.plat]}.`),
+      ];
+      banner = `<div class="notice curating"><b>Some of your cards aren’t listed yet</b><span>That’s normal. ${waiting.length ? "Fanatics Collect and PC Sportscards review every card before listing it, which can take a while. " : ""}They’ll show up here as soon as they go live.</span><ul>${lines.map(t => `<li>${t}</li>`).join("")}</ul></div>`;
+    }
     const list = mine.filter(l => (tab === "all" || (tab === "live" ? l.status === "live" : isSold(l))) && (!fp || l.plat === fp))
       .sort((a, b) => {
         if (tab === "live") { const ea = a.ends ? new Date(a.ends) : Infinity, eb = b.ends ? new Date(b.ends) : Infinity; return ea - eb; }
         return new Date(b.soldDate || b.added) - new Date(a.soldDate || a.added);
       });
-    q("cards").innerHTML = list.length ? list.map(l => {
+    q("cards").innerHTML = banner + (list.length ? list.map(l => {
       const tl = l.format === "auction" && l.status === "live" ? timeLeft(l.ends) : "";
       let label, sub;
       if (l.status === "live") { label = l.format === "bin" ? "Asking" : "Current bid"; sub = l.format === "bin" ? "Buy It Now" : (tl ? `<span class="${endsSoon(l) ? "soon" : ""}">Ends in ${tl}</span>` : "Auction"); }
@@ -193,7 +220,7 @@ export function mountDashboard(root, pickerHtml) {
         </div>
         <div class="right"><span class="sub">${label}</span><span class="amt">${l.status === "unsold" ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
       </article>`;
-    }).join("") : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`;
+    }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
   }
   return { render };
 }
