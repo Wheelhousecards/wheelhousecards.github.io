@@ -1,0 +1,64 @@
+rules_version = '2';
+
+// Wheelhouse Consignment security rules
+// - Staff: anyone whose email has a document in /staff/{email}. Staff can read and write everything.
+// - Customers: signed in by email link. They can read only documents stamped with their own email
+//   (custEmail on listings, batches and photos; email on their customer record). They can't write anything.
+// - Staff-only data (batch notes, counters, staff list) is unreadable to customers.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+    function isStaff() {
+      return signedIn() && exists(/databases/$(database)/documents/staff/$(myEmail()));
+    }
+    function ownsDoc() {
+      return signedIn() && resource.data.custEmail == myEmail();
+    }
+
+    match /staff/{email} {
+      allow read: if signedIn() && (email == myEmail() || isStaff());
+      allow write: if isStaff();
+    }
+
+    match /customers/{id} {
+      allow read: if isStaff() || (signedIn() && resource.data.email == myEmail());
+      allow write: if isStaff();
+    }
+
+    match /listings/{id} {
+      allow read: if isStaff() || ownsDoc();
+      allow write: if isStaff();
+    }
+
+    match /batches/{id} {
+      allow read: if isStaff() || ownsDoc();
+      allow write: if isStaff();
+    }
+
+    match /photos/{id} {
+      allow read: if isStaff() || ownsDoc();
+      allow write: if isStaff();
+    }
+
+    match /batchNotes/{id} {
+      allow read, write: if isStaff();
+    }
+
+    match /meta/{id} {
+      allow read, write: if isStaff();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

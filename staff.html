@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Wheelhouse Consignment Staff</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='3' width='18' height='26' rx='3' fill='%231d5a86'/%3E%3Crect x='10' y='6' width='12' height='5' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<header><div class="wrap">
+  <div class="brand"><b>Wheelhouse</b><span>Consignment · Staff</span></div>
+  <div class="hdr-actions">
+    <div class="seg" role="group" aria-label="View" id="modes" hidden>
+      <button type="button" id="m-staff" aria-pressed="true">Staff</button>
+      <button type="button" id="m-cust" aria-pressed="false">Customer view</button>
+    </div>
+    <span id="acct" hidden class="row" style="gap:8px"><span class="who-chip" id="acct-email"></span><button class="btn ghost sm" type="button" id="logout">Sign out</button></span>
+  </div>
+</div></header>
+
+<main><div class="wrap" style="padding-block:20px 48px;display:grid;gap:20px">
+  <section class="gate" id="gate" hidden></section>
+  <div class="loading" id="loading">Loading…</div>
+  <section class="gate" id="denied" hidden>
+    <div class="box">
+      <h1>Not on the staff list</h1>
+      <p id="denied-msg"></p>
+      <button class="btn ghost" type="button" id="denied-out">Sign out</button>
+    </div>
+  </section>
+
+  <!-- STAFF -->
+  <section id="staff" hidden style="display:grid;gap:20px">
+    <div class="staff-top">
+      <div class="panel">
+        <h2>Add a listing</h2>
+        <form id="addForm" class="form" autocomplete="off">
+          <div class="f w6"><label for="a-url">Listing link (Fanatics Collect or eBay)</label>
+            <input id="a-url" placeholder="https://www.fanaticscollect.com/… or https://www.ebay.com/itm/…" required>
+            <div class="detect" id="detect">Paste a link and the platform is detected automatically.</div></div>
+          <div class="f"><label for="a-sku">SKU</label><input id="a-sku" class="num" inputmode="numeric" maxlength="6" style="font-family:var(--mono)" required></div>
+          <div class="f"><label for="a-cust">Consignor</label><select id="a-cust" required></select></div>
+          <div class="f"><label for="a-format">Format</label>
+            <select id="a-format"><option value="auction">Auction</option><option value="bin">Buy It Now</option></select></div>
+          <div class="f w4"><label for="a-title">Card</label><input id="a-title" placeholder="2018 Panini Prizm #280 Luka Doncic" required></div>
+          <div class="f"><label for="a-batch">Batch</label><select id="a-batch"></select></div>
+          <div class="f"><label for="a-grade">Grade</label><input id="a-grade" placeholder="PSA 10, or blank"></div>
+          <div class="f"><label for="a-cert">Cert #</label><input id="a-cert" placeholder="Ungraded" style="font-family:var(--mono)" disabled></div>
+          <div class="f"><label for="a-price">Price / current bid</label><input id="a-price" type="number" min="0" step="0.01" placeholder="0.00"></div>
+          <div class="f"><label for="a-ends">Auction ends</label><input id="a-ends" type="datetime-local"></div>
+          <div class="f w4" style="align-self:end"><button class="btn" type="submit" id="a-save">Add listing</button></div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h2>Consignors</h2>
+        <input id="c-q" placeholder="Search consignors" aria-label="Search consignors">
+        <div class="cust-list" id="custList"></div>
+        <form id="custForm" class="form" autocomplete="off">
+          <div class="f w4"><label for="c-name">Name</label><input id="c-name" required></div>
+          <div class="f"><label for="c-rate">Payout %</label><input id="c-rate" type="number" min="0" max="100" value="85"></div>
+          <div class="f w3"><label for="c-email">Email (their login)</label><input id="c-email" type="email" placeholder="name@email.com" required></div>
+          <div class="f w3"><label for="c-phone">Phone</label><input id="c-phone" type="tel" inputmode="tel" placeholder="(215) 555-0100"></div>
+          <div class="f w6"><div class="row"><button class="btn" type="submit" id="c-save">Add consignor</button><button class="btn ghost" type="button" id="c-cancel" hidden>Cancel</button><span class="detect" id="c-msg"></span></div></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="panel" id="batches">
+      <div class="row" style="justify-content:space-between"><h2>Batches</h2><span class="muted num" id="b-count"></span></div>
+      <form id="bForm" class="form" autocomplete="off">
+        <div class="f"><label for="b-cust">Customer</label><select id="b-cust" required></select></div>
+        <div class="f"><label for="b-plat">Shipped to</label><select id="b-plat"><option value="fan">Fanatics Collect</option><option value="pcs">PC Sportscards</option></select></div>
+        <div class="f"><label for="b-cards">Total cards</label><input id="b-cards" type="number" min="0" step="1" placeholder="0"></div>
+        <div class="f"><label for="b-recv">Date received</label><input id="b-recv" type="date" required></div>
+        <div class="f"><label for="b-ship">Date shipped</label><input id="b-ship" type="date"></div>
+        <div class="f"><label for="b-photos">Photos of cards sent</label><input id="b-photos" type="file" accept="image/*" multiple></div>
+        <div class="f w6"><label for="b-notes">Staff notes (customers don’t see these)</label><input id="b-notes" placeholder="Tracking #, box count, anything else"></div>
+        <div class="f w6"><div class="thumbs" id="b-pending"></div></div>
+        <div class="f w6"><div class="row"><button class="btn" type="submit" id="b-save">Log batch</button><button class="btn ghost" type="button" id="b-cancel" hidden>Cancel</button><span class="detect" id="b-msg"></span></div></div>
+      </form>
+      <div class="filters"><select id="bf-cust" aria-label="Filter batches by customer"></select><select id="bf-sort" aria-label="Sort batches"><option value="cust">Group by customer</option><option value="ship">Newest shipped first</option><option value="recv">Newest received first</option></select></div>
+      <div class="tbl-wrap"><table class="btbl"><thead><tr><th>Batch</th><th>Customer</th><th>Shipped to</th><th>Received</th><th>Shipped</th><th>Cards</th><th>Photos</th><th></th></tr></thead><tbody id="b-body"></tbody></table></div>
+    </div>
+
+    <div class="panel" id="imp">
+      <div class="row" style="justify-content:space-between"><h2>Import a spreadsheet</h2><span class="muted" style="font-size:12px">CSV or Excel (.xlsx)</span></div>
+      <div class="imp-types" role="radiogroup" aria-label="Spreadsheet type">
+        <label class="itype"><input type="radio" name="itype" value="full" id="it-full" checked><span><b>Wheelhouse sheet</b><small>Consignor, link, card, grade and cert are already filled in. Cards go straight to each consignor.</small></span></label>
+        <label class="itype"><input type="radio" name="itype" value="pcs" id="it-pcs"><span><b>PC Sportscards CSV</b><small>No consignor info. Cards come in unassigned, then you pick who owns them.</small></span></label>
+      </div>
+      <label class="drop" id="drop"><input type="file" id="i-file" accept=".csv,.tsv,.txt,.xlsx,.xls"><span id="drop-t"><b>Choose a file</b> or drop it here</span></label>
+      <div id="i-map" hidden style="display:grid;gap:12px">
+        <div><h3>Match the columns</h3><div class="muted" style="font-size:12px;margin-top:2px">These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.</div></div>
+        <div class="map" id="i-fields"></div>
+        <div style="display:grid;gap:4px;max-width:420px"><label for="i-batch">Put these cards in a batch</label><select id="i-batch"></select><span class="muted" style="font-size:12px">Cards with no consignor take the batch’s customer.</span></div>
+        <div id="i-sum" style="font-size:13px"></div>
+        <div class="tbl-wrap"><table class="prev"><thead><tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr></thead><tbody id="i-prev"></tbody></table></div>
+        <div class="row"><button class="btn" type="button" id="i-go">Import</button><button class="btn ghost" type="button" id="i-cancel">Cancel</button></div>
+      </div>
+      <div class="detect" id="i-msg" role="status"></div>
+    </div>
+
+    <div class="panel" id="ledger">
+      <div class="row" style="justify-content:space-between"><h2>All consigned cards</h2><span class="muted num" id="count"></span></div>
+      <div class="alert" id="needs" hidden></div>
+      <div class="bulkbar" id="bulkbar" hidden>
+        <b id="bb-n"></b>
+        <span class="grp"><select id="bb-cust" aria-label="Consignor to assign"></select><button class="btn sm" type="button" id="bb-cust-go">Assign</button></span>
+        <span class="grp"><select id="bb-st" aria-label="Status to set"><option value="live">Live</option><option value="sold">Sold</option><option value="unsold">Unsold</option><option value="paid">Paid out</option></select><button class="btn ghost sm" type="button" id="bb-st-go">Set status</button></span>
+        <span class="grp"><select id="bb-fmt" aria-label="Format to set"><option value="auction">Auction</option><option value="bin">Buy It Now</option></select><button class="btn ghost sm" type="button" id="bb-fmt-go">Set format</button></span>
+        <span class="grp"><select id="bb-batch" aria-label="Batch to add to"></select><button class="btn ghost sm" type="button" id="bb-batch-go">Add to batch</button></span>
+        <button class="btn ghost sm" type="button" id="bb-del">Remove</button>
+        <button class="btn ghost sm" type="button" id="bb-clear">Clear selection</button>
+      </div>
+      <div class="detect" id="ledger-msg" role="status"></div>
+      <div class="filters">
+        <input id="f-q" placeholder="Search SKU, cert #, card or item #" aria-label="Search cards">
+        <select id="f-cust" aria-label="Filter by consignor"></select>
+        <select id="f-plat" aria-label="Filter by platform"><option value="">All platforms</option><option value="fan">Fanatics Collect</option><option value="pcs">PC Sportscards (eBay)</option></select>
+        <select id="f-st" aria-label="Filter by status"><option value="">All statuses</option><option value="live">Live</option><option value="sold">Sold</option><option value="unsold">Unsold / returned</option><option value="paid">Paid out</option></select>
+        <select id="f-batch" aria-label="Filter by batch"></select>
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th><input type="checkbox" id="selAll" aria-label="Select all cards shown"></th><th>SKU</th><th>Consignor</th><th>Platform</th><th>Card</th><th>Grade</th><th>Format</th><th>Price / bid</th><th>Ends</th><th>Status</th><th>Link</th><th></th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table></div>
+    </div>
+
+    <div class="panel" id="team">
+      <div class="row" style="justify-content:space-between"><h2>Staff access</h2><span class="muted" style="font-size:12px">People on this list can sign in here and edit everything.</span></div>
+      <div class="staff-mgr" id="staffList"></div>
+      <form id="staffForm" class="row" autocomplete="off">
+        <input id="s-email" type="email" placeholder="employee@email.com" aria-label="Staff email" style="flex:1 1 220px;width:auto">
+        <button class="btn" type="submit">Give staff access</button>
+        <span class="detect" id="s-msg"></span>
+      </form>
+    </div>
+  </section>
+
+  <!-- CUSTOMER PREVIEW -->
+  <section id="cust" hidden style="display:grid;gap:18px"></section>
+</div></main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module" src="assets/staff.js"></script>
+</body>
+</html>
