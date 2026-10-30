@@ -4,7 +4,7 @@ export const $ = (s, r = document) => r.querySelector(s);
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const money = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
 export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards" };
-export const STAT = { live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid out" };
+export const STAT = { curating: "Being curated", live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid out" };
 export const pad6 = n => String(n).padStart(6, "0");
 export const plural = n => `${n} card${n === 1 ? "" : "s"}`;
 export const isSold = l => l.status === "sold" || l.status === "paid";
@@ -32,11 +32,15 @@ export function detect(url) {
 
 export function normGrade(g) {
   g = String(g || "").trim();
-  return !g || /^(raw|ungraded|none|n\/?a)$/i.test(g) ? "Ungraded" : g;
+  // Fanatics exports list ungraded (authentic-only) cards as "CGC 0".
+  return !g || /^(raw|ungraded|none|n\/?a)$/i.test(g) || /^[a-z]+\s*0$/i.test(g) ? "Ungraded" : g;
 }
 
 export function gradeHtml(l, stack) {
-  if (!l.grade || l.grade === "Ungraded") return `<span class="slab raw">Ungraded</span>`;
+  if (!l.grade || l.grade === "Ungraded") {
+    const raw = `<span class="slab raw">Ungraded</span>`, c = l.cert ? `<span class="cert">Cert ${esc(l.cert)}</span>` : "";
+    return stack && c ? `<div class="gcell">${raw}${c}</div>` : raw + c;
+  }
   const cert = l.cert ? `<span class="cert">Cert ${esc(l.cert)}</span>` : `<span class="cert">No cert on file</span>`;
   return stack ? `<div class="gcell"><span class="slab">${esc(l.grade)}</span>${cert}</div>` : `<span class="slab">${esc(l.grade)}</span>${cert}`;
 }
@@ -126,7 +130,7 @@ export function createLightbox(getBatch, loadFull) {
 // Fanatics and PC Sportscards can take a long time to curate and list a shipment,
 // so a shipped batch with cards still unlisted gets a reassuring status instead of looking empty.
 export function batchStage(b, cards) {
-  const sent = b.cards || 0, listed = cards.length, where = PLAT[b.plat];
+  const sent = b.cards || 0, listed = cards.filter(l => l.status !== "curating").length, where = PLAT[b.plat];
   if (!b.ship) return { k: "prep", title: "Getting ready to ship", text: `Your cards are safe at Wheelhouse. We’re preparing this batch to send to ${where}.` };
   if (!listed) return { k: "curating", title: `Being curated by ${where}`, text: `We shipped your cards on ${fmtDay(b.ship)}. ${where} is reviewing and photographing them before they go up for sale, which can take a while. Your cards will show up here as soon as they’re listed.` };
   if (sent && listed < sent) return { k: "partial", title: `${sent - listed} still being curated`, text: `${listed} of ${sent} cards are listed. ${where} is still working through the rest, and they’ll show up here as they’re listed.` };
@@ -206,17 +210,21 @@ export function mountDashboard(root, pickerHtml) {
     }
     // Shipped batches that aren't fully listed yet, summarized above the card list.
     const waiting = batches.filter(b => b.ship && (!fp || b.plat === fp)).map(b => {
-      const n = mine.filter(l => l.batch === b.id).length, s = batchStage(b, mine.filter(l => l.batch === b.id));
+      const inB = mine.filter(l => l.batch === b.id), n = inB.filter(l => l.status !== "curating").length, s = batchStage(b, inB);
       return s ? { b, s, left: b.cards ? Math.max(0, b.cards - n) : null } : null;
     }).filter(Boolean);
     const prep = batches.filter(b => !b.ship && (!fp || b.plat === fp));
+    // Cards entered but not listed yet that aren't covered by a batch line above.
+    const loose = mine.filter(l => l.status === "curating" && (!fp || l.plat === fp) && !waiting.some(x => x.b.id === l.batch) && !prep.some(b => b.id === l.batch));
+    const looseBy = Object.keys(PLAT).map(k => [k, loose.filter(l => l.plat === k).length]).filter(([, n]) => n);
     let banner = "";
-    if (tab !== "sold" && (waiting.length || prep.length)) {
+    if (tab !== "sold" && (waiting.length || prep.length || loose.length)) {
       const lines = [
+        ...looseBy.map(([k, n]) => `${n} card${n === 1 ? " is" : "s are"} being curated by ${PLAT[k]}.`),
         ...waiting.map(({ b, left }) => `${left != null ? `${left} card${left === 1 ? "" : "s"}` : "Cards"} from batch <span class="code">${esc(b.id)}</span> ${left === 1 ? "is" : "are"} being curated by ${PLAT[b.plat]} (shipped ${fmtDay(b.ship)}).`),
         ...prep.map(b => `Batch <span class="code">${esc(b.id)}</span> is at Wheelhouse getting ready to ship to ${PLAT[b.plat]}.`),
       ];
-      banner = `<div class="notice curating"><b>Some of your cards aren’t listed yet</b><span>That’s normal. ${waiting.length ? "Fanatics Collect and PC Sportscards review every card before listing it, which can take a while. " : ""}They’ll show up here as soon as they go live.</span><ul>${lines.map(t => `<li>${t}</li>`).join("")}</ul></div>`;
+      banner = `<div class="notice curating"><b>Some of your cards aren’t listed yet</b><span>That’s normal. ${waiting.length || loose.length ? "Fanatics Collect and PC Sportscards review every card before listing it, which can take a while. " : ""}They’ll show up here as soon as they go live.${loose.length ? " You can see them under Everything." : ""}</span><ul>${lines.map(t => `<li>${t}</li>`).join("")}</ul></div>`;
     }
     const list = mine.filter(l => (tab === "all" || (tab === "live" ? l.status === "live" : isSold(l))) && (!fp || l.plat === fp))
       .sort((a, b) => {
@@ -227,14 +235,15 @@ export function mountDashboard(root, pickerHtml) {
       const tl = l.format === "auction" && l.status === "live" ? timeLeft(l.ends) : "";
       let label, sub;
       if (l.status === "live") { label = l.format === "bin" ? "Asking" : "Current bid"; sub = l.format === "bin" ? "Buy It Now" : (tl ? `<span class="${endsSoon(l) ? "soon" : ""}">Ends in ${tl}</span>` : "Auction"); }
+      else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
       else if (isSold(l)) { label = "Sold for"; sub = `You receive ${money((l.price || 0) * rate)}` + (l.status === "paid" ? " · paid" : ""); }
       else { label = "Did not sell"; sub = "Ask us about relisting"; }
       return `<article class="card">
         <div style="display:grid;gap:6px;min-width:0">
           <div class="t">${esc(l.title)}</div>
-          <div class="meta"><span class="code">SKU ${esc(l.sku)}</span>${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a></div>
+          <div class="meta"><span class="code">SKU ${esc(l.sku)}</span>${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
         </div>
-        <div class="right"><span class="sub">${label}</span><span class="amt">${l.status === "unsold" ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
+        <div class="right"><span class="sub">${label}</span><span class="amt">${l.status === "unsold" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
       </article>`;
     }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
   }

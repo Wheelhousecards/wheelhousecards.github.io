@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261030122919";
+import { db, logout } from "./firebase.js?v=20261030133016";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -7,8 +7,8 @@ import {
 import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor
-} from "./ui.js?v=20261030122919";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030122919";
+} from "./ui.js?v=20261030133016";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030133016";
 
 /* ---------- state ---------- */
 const S = { customers: [], listings: [], batches: [], staff: [], notes: {}, counters: {} };
@@ -208,7 +208,7 @@ function renderLedger() {
       <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}"></td>
       <td class="num">${l.format === "auction" && l.status === "live" ? esc(timeLeft(l.ends)) : ""}</td>
       <td><select data-f="status" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select></td>
-      <td><a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a></td>
+      <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
       <td><button class="x" type="button" data-del aria-label="Remove SKU ${esc(l.sku)}">${delOne === l.id ? "Sure?" : "×"}</button></td></tr>`;
   }).join("") + (rows.length > 500 ? `<tr><td colspan="12" class="muted">Showing the first 500 of ${rows.length}. Search or filter to narrow it down.</td></tr>` : "")
     : `<tr><td colspan="12"><div class="empty">${S.listings.length ? "No cards match these filters." : "No cards yet. Add a listing above or import a spreadsheet."}</div></td></tr>`;
@@ -221,18 +221,21 @@ $("#c-q").addEventListener("input", renderCustList);
 /* ---------- add a listing ---------- */
 $("#a-url").addEventListener("input", e => {
   const d = detect(e.target.value);
-  $("#detect").innerHTML = !e.target.value ? "Paste a link and the platform is detected automatically." : d ? `Detected <span class="chip ${d.plat}">${PLAT[d.plat]}</span>${d.item ? ` · item <span class="code">#${esc(d.item)}</span>` : ""}` : "Not a Fanatics Collect or eBay link.";
+  $("#detect").innerHTML = !e.target.value ? "No link yet? Leave it blank and the card shows as Being curated until you add one." : d ? `Detected <span class="chip ${d.plat}">${PLAT[d.plat]}</span>${d.item ? ` · item <span class="code">#${esc(d.item)}</span>` : ""}` : "Not a Fanatics Collect or eBay link.";
+  if (d) $("#a-plat").value = d.plat;
   if (d && d.plat === "pcs") $("#a-format").value = "auction";
 });
 $("#a-sku").addEventListener("input", e => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); if (e.target.value) e.target.dataset.manual = "1"; else delete e.target.dataset.manual; });
 $("#a-sku").addEventListener("blur", e => { if (e.target.value) e.target.value = pad6(e.target.value); });
-$("#a-grade").addEventListener("input", e => { const raw = normGrade(e.target.value) === "Ungraded"; $("#a-cert").disabled = raw; $("#a-cert").placeholder = raw ? "Ungraded" : "Cert number"; if (raw) $("#a-cert").value = ""; });
+$("#a-grade").addEventListener("input", e => { const raw = normGrade(e.target.value) === "Ungraded"; $("#a-cert").placeholder = raw ? "Optional if ungraded" : "Cert number"; });
+$("#a-plat").addEventListener("change", e => { if (e.target.value === "pcs") $("#a-format").value = "auction"; });
 $("#a-batch").addEventListener("change", e => { const b = batchById(e.target.value); if (b && !$("#a-cust").value) $("#a-cust").value = b.cust; });
 $("#addForm").addEventListener("submit", async e => {
   e.preventDefault();
   const say = t => { $("#detect").textContent = t; };
-  const url = $("#a-url").value.trim(), d = detect(url);
-  if (!d) return say("That link isn’t from Fanatics Collect or eBay. Check the link and try again.");
+  const url = $("#a-url").value.trim(), d = url ? detect(url) : null;
+  if (url && !d) return say("That link isn’t from Fanatics Collect or eBay. Check the link and try again, or leave it blank until the card is curated.");
+  const plat = d ? d.plat : $("#a-plat").value;
   const cust = $("#a-cust").value;
   if (!custById(cust)) return say("Choose the consignor this card belongs to.");
   const manual = !!$("#a-sku").dataset.manual, typed = $("#a-sku").value.trim();
@@ -241,10 +244,10 @@ $("#addForm").addEventListener("submit", async e => {
     const dup = S.listings.find(l => l.sku === typed);
     if (dup) return say(`SKU ${typed} is already used for ${dup.title}. Pick another SKU.`);
   }
-  const grade = normGrade($("#a-grade").value), cert = grade === "Ungraded" ? "" : $("#a-cert").value.trim();
+  const grade = normGrade($("#a-grade").value), cert = $("#a-cert").value.trim();
   if (grade !== "Ungraded" && !cert) return say(`Enter the cert number for this ${grade} card, or clear the grade if it’s ungraded.`);
-  const cdup = cert && S.listings.find(l => l.cert === cert && l.status === "live");
-  if (cdup) return say(`Cert ${cert} is already live as SKU ${cdup.sku} (${cdup.title}).`);
+  const cdup = cert && S.listings.find(l => l.cert === cert && (l.status === "live" || l.status === "curating"));
+  if (cdup) return say(`Cert ${cert} is already in the system as SKU ${cdup.sku} (${cdup.title}).`);
   const title = $("#a-title").value.trim();
   if (!title) return say("Enter the card name.");
   $("#a-save").disabled = true; say("Saving…");
@@ -253,13 +256,13 @@ $("#addForm").addEventListener("submit", async e => {
     if (manual) await bump("sku", parseInt(sku, 10));
     const ends = $("#a-ends").value, p = parseFloat($("#a-price").value);
     await setDoc(doc(col("listings")), {
-      sku, cust, custEmail: emailOf(cust), batch: $("#a-batch").value || "", plat: d.plat, url, item: d.item, title, grade, cert,
+      sku, cust, custEmail: emailOf(cust), batch: $("#a-batch").value || "", plat, url, item: d ? d.item : "", title, grade, cert,
       format: $("#a-format").value, price: isNaN(p) ? null : p, ends: ends ? new Date(ends).toISOString() : "",
-      status: "live", soldDate: "", added: now(), addedBy: me, updatedAt: serverTimestamp()
+      status: url ? "live" : "curating", soldDate: "", added: now(), addedBy: me, updatedAt: serverTimestamp()
     });
     ["#a-url", "#a-title", "#a-grade", "#a-cert", "#a-price", "#a-ends"].forEach(s => { $(s).value = ""; });
-    $("#a-cert").disabled = true; delete $("#a-sku").dataset.manual;
-    say(`Added as SKU ${sku}. It now shows on ${custById(cust).name}’s page.`);
+    delete $("#a-sku").dataset.manual;
+    say(`Added as SKU ${sku}. It shows on ${custById(cust).name}’s page as ${url ? "Live" : "Being curated"}.`);
   });
   $("#a-save").disabled = false;
 });
@@ -406,6 +409,13 @@ $("#tbody").addEventListener("change", async e => {
   const f = e.target.dataset.f;
   await guarded($("#ledger-msg"), async () => {
     if (f === "cust" && e.target.value) { await updateDoc(listingRef(l.id), { cust: e.target.value, custEmail: emailOf(e.target.value), updatedAt: serverTimestamp() }); lmsg(`SKU ${l.sku} assigned to ${custById(e.target.value).name}.`); }
+    if (f === "url") {
+      const url = e.target.value.trim(); if (!url) return;
+      const d = detect(url);
+      if (!d) { lmsg("That link isn’t from Fanatics Collect or eBay."); return; }
+      await updateDoc(listingRef(l.id), { url, item: d.item, plat: d.plat, ...(l.status === "curating" ? { status: "live" } : {}), updatedAt: serverTimestamp() });
+      lmsg(`Linked SKU ${l.sku}. It’s now live on the customer’s page.`);
+    }
     if (f === "price") { const p = parseFloat(e.target.value); await updateDoc(listingRef(l.id), { price: isNaN(p) ? null : p, updatedAt: serverTimestamp() }); }
     if (f === "status") {
       const s = e.target.value, data = { status: s, updatedAt: serverTimestamp() };
@@ -646,7 +656,7 @@ const FIELDS = [
   { k: "format", label: "Format", re: /format|listing.?type|^type$/i, only: "full" },
   { k: "status", label: "Status", re: /status|state/i },
   { k: "sku", label: "SKU", re: /sku/i },
-  { k: "plat", label: "Platform", re: /platform|site|market/i, only: "full" },
+  { k: "plat", label: "Auction house", re: /platform|site|market|auction ?house/i, only: "full" },
   { k: "batch", label: "Batch", re: /batch/i, only: "full" },
 ];
 let imp = null;
@@ -702,10 +712,17 @@ function parsePayout(p1, p2, a2, city, state, zip) {
   return { payMethod, payTo, mailing, payNote: notes.join("; ") };
 }
 const money2 = v => { const n = parseFloat(String(v || "").replace(/[^0-9.-]/g, "")); return isNaN(n) ? 0 : Math.round(n * 100) / 100; };
-const fieldsFor = type => type === "cust" ? CFIELDS : FIELDS.filter(f => !f.only || f.only === type);
+// Fanatics collection export: only these columns are used, everything else in the file is ignored.
+const FFIELDS = [
+  { k: "url", label: "Listing link (the column you add)", re: /url|link/i },
+  { k: "cert", label: "Cert #", re: /cert/i },
+  { k: "title", label: "Card", re: /title|card|desc/i },
+  { k: "grade", label: "Grade", re: /grade/i },
+];
+const fieldsFor = type => type === "cust" ? CFIELDS : type === "fan" ? FFIELDS : FIELDS.filter(f => !f.only || f.only === type);
 function guessMap(headers, type) {
   const map = {}, used = new Set();
-  (type === "cust" ? CFIELDS : FIELDS).forEach(f => {
+  (type === "cust" ? CFIELDS : type === "fan" ? FFIELDS : FIELDS).forEach(f => {
     if (f.only && f.only !== type) { map[f.k] = -1; return; }
     const i = headers.findIndex((h, ix) => !used.has(ix) && f.re.test(h));
     map[f.k] = i; if (i >= 0) used.add(i);
@@ -750,11 +767,11 @@ function planImport() {
     const title = g("title");
     if (!title && !item && !url) return null;
     const label = title || item || url;
-    if (!plat) return { act: "skip", why: "No Fanatics or eBay link", label };
-    if (!url) return { act: "skip", why: "No link or eBay item #", label };
+    if (!plat) return { act: "skip", why: type === "full" ? "No link or auction house" : "No Fanatics or eBay link", label };
+    if (!url && type !== "full") return { act: "skip", why: "No link or eBay item #", label };
     if (!title) return { act: "skip", why: "No card title", label };
     if (item) { if (seen.has(item)) return { act: "skip", why: "Same item # is in the file twice", label }; seen.add(item); }
-    const grade = normGrade(g("grade")), cert = grade === "Ungraded" ? "" : g("cert");
+    const grade = normGrade(g("grade")), cert = g("cert");
     const pr = g("price").replace(/[^0-9.]/g, ""), price = pr ? parseFloat(pr) : null;
     const et = g("ends") ? Date.parse(g("ends")) : NaN, ends = isNaN(et) ? "" : new Date(et).toISOString();
     const sv = g("status").toLowerCase();
@@ -776,7 +793,7 @@ function planImport() {
     if (!sku || used.has(sku)) { while (used.has(pad6(next))) next++; sku = pad6(next++); auto = true; }
     used.add(sku);
     if (grade !== "Ungraded" && !cert) warn = warn || "Graded, but no cert #";
-    return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends, status: status || "live", soldDate: (status === "sold" || status === "paid") ? now() : "" } };
+    return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends, status: status || (url ? "live" : "curating"), soldDate: (status === "sold" || status === "paid") ? now() : "" } };
   }).filter(Boolean);
 }
 function planCust() {
@@ -827,6 +844,62 @@ function planCust() {
     return { act: "new", label: name, email, warn: warns.join(" · "), data };
   }).filter(Boolean);
 }
+// Match each row of a Fanatics export to a card already entered: cert number first, then exact title.
+function planFan() {
+  const m = imp.map, pick = batchById($("#i-batch").value);
+  const digits = v => String(v || "").replace(/\D/g, "");
+  const norm = t => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const byCert = new Map();
+  S.listings.filter(l => digits(l.cert)).sort((a, b) => (a.plat === "fan" ? 1 : 0) - (b.plat === "fan" ? 1 : 0)).forEach(l => byCert.set(digits(l.cert), l));
+  const byTitle = new Map();
+  S.listings.filter(l => l.plat === "fan" && !l.url).forEach(l => { const k = norm(l.title); byTitle.set(k, byTitle.has(k) ? null : l); });
+  const used = new Set(), usedSku = new Set(S.listings.map(l => l.sku));
+  let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
+  return imp.rows.map(r => {
+    const g = k => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
+    const url = g("url"), title = g("title"), cert = digits(g("cert")), grade = normGrade(g("grade"));
+    if (!url && !title && !cert) return null;
+    const label = title || `Cert ${cert}`;
+    const d = url ? detect(url) : null;
+    if (url && !d) return { act: "skip", why: "Link isn’t from Fanatics Collect or eBay", label };
+    let t = cert && byCert.get(cert), how = "cert";
+    if (!t) { t = byTitle.get(norm(title)); how = "title"; }
+    if (t && used.has(t.id)) return { act: "skip", why: `Same card as another row (SKU ${t.sku})`, label };
+    if (t) {
+      used.add(t.id);
+      if (!url) return { act: "skip", why: `No link yet (matches SKU ${t.sku})`, label };
+      if (t.url === url) return { act: "skip", why: `Already linked (SKU ${t.sku})`, label };
+      const patch = { url, item: d.item, plat: d.plat };
+      if (t.status === "curating") patch.status = "live";
+      if (!digits(t.cert) && cert) patch.cert = cert;
+      if ((!t.grade || t.grade === "Ungraded") && grade !== "Ungraded") patch.grade = grade;
+      if (!custById(t.cust) && pick) { patch.cust = pick.cust; patch.custEmail = emailOf(pick.cust); patch.batch = pick.id; }
+      return { act: "update", how, target: t, patch, label: t.title, grade, cert };
+    }
+    if (!url) return { act: "skip", why: "No link, and no matching card entered", label };
+    while (usedSku.has(pad6(next))) next++;
+    const sku = pad6(next++); usedSku.add(sku);
+    return { act: "new", auto: true, label, warn: pick ? "" : "No matching card. Added for you to assign.", data: { sku, cust: pick ? pick.cust : "", batch: pick ? pick.id : "", plat: d.plat, url, item: d.item, title, grade, cert, format: d.plat === "pcs" ? "auction" : "bin", price: null, ends: "", status: "live", soldDate: "" } };
+  }).filter(Boolean);
+}
+function renderFanImport() {
+  $("#i-batchwrap").hidden = false;
+  $("#i-help").textContent = "Only the link, cert #, card title and grade are read. Everything else in the export is ignored. Each row is matched to a card you already entered, by cert number first, then by exact title. CGC 0 means ungraded.";
+  $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Grade</th><th>Consignor</th></tr>";
+  const plan = planFan(), n = a => plan.filter(p => p.act === a).length;
+  const unassigned = plan.filter(p => p.act === "new" && !p.data.cust).length;
+  $("#i-sum").innerHTML = `<span class="act-upd">${n("update")} matched and linked</span> · <span class="act-new">${n("new")} not entered yet</span> · <span class="act-skip">${n("skip")} skipped</span>${unassigned ? ` · <span class="need">${unassigned} will need a consignor</span>` : ""}`;
+  const order = { update: 0, new: 1, skip: 2 };
+  $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).slice(0, 12).map(p => {
+    const c = p.act === "update" ? custById(p.target.cust) : p.data ? custById(p.data.cust) : null;
+    const act = p.act === "update" ? `<span class="act-upd">Links SKU ${esc(p.target.sku)}</span><div class="cert">matched by ${p.how}</div>` : p.act === "new" ? `<span class="act-new">New · SKU ${p.data.sku}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
+    const gl = p.act === "update" ? { grade: p.patch.grade || p.target.grade, cert: p.patch.cert || p.target.cert } : p.data;
+    return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td>${gl ? gradeHtml(gl, true) : ""}</td><td>${p.act === "skip" ? "" : c ? esc(c.name) : '<span class="need">Needs consignor</span>'}${p.warn ? `<div class="cert" style="white-space:normal">${esc(p.warn)}</div>` : ""}</td></tr>`;
+  }).join("") + (plan.length > 12 ? `<tr><td colspan="4" class="muted">…and ${plan.length - 12} more rows</td></tr>` : "");
+  const go = n("update") + n("new");
+  $("#i-go").disabled = !go;
+  $("#i-go").textContent = go ? `Link ${n("update")} card${n("update") === 1 ? "" : "s"}` + (n("new") ? ` and add ${n("new")}` : "") : "Nothing to import";
+}
 function renderCustImport() {
   $("#i-batchwrap").hidden = true;
   $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Payout info is read from both Address Line 1 and Payment Method, and a street address with no Venmo or PayPal becomes a check. People already in the system (same email) are skipped, so you can upload the same list again safely.";
@@ -851,6 +924,7 @@ function renderImport() {
     $("#i-fields").innerHTML = fieldsFor(type).map(f => `<div class="f"><label for="map-${f.k}">${f.label}</label><select id="map-${f.k}" data-k="${f.k}"><option value="-1">Not in file</option>${imp.headers.map((h, i) => `<option value="${i}"${imp.map[f.k] === i ? " selected" : ""}>${esc(h)}</option>`).join("")}</select></div>`).join("");
   }
   if (type === "cust") return renderCustImport();
+  if (type === "fan") return renderFanImport();
   $("#i-batchwrap").hidden = false;
   $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.";
   $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr>";
@@ -892,7 +966,7 @@ $("#i-go").addEventListener("click", async () => {
     $("#i-msg").textContent = `Added ${fresh.length} consignor${fresh.length === 1 ? "" : "s"}. To see their cards, each one goes to wheelhousecards.github.io, chooses “Create account”, and uses the email you have on file for them.` + (noEmail ? ` ${noEmail} have no email yet. Add one with Edit in the Consignors list before they can sign in.` : "");
     return;
   }
-  const plan = planImport();
+  const plan = itype() === "fan" ? planFan() : planImport();
   const fresh = plan.filter(p => p.act === "new"), ups = plan.filter(p => p.act === "update");
   $("#i-go").disabled = true; $("#i-msg").textContent = "Importing…";
   const res = await guarded($("#i-msg"), async () => {
@@ -907,6 +981,7 @@ $("#i-go").addEventListener("click", async () => {
     const ops = [];
     fresh.forEach(p => ops.push(["set", doc(col("listings")), { ...p.data, custEmail: emailOf(p.data.cust), added: now(), addedBy: me, updatedAt: serverTimestamp() }]));
     ups.forEach(p => {
+      if (p.patch) { ops.push(upd(p.target.id, p.patch)); return; }
       const t = p.target, data = {};
       if (p.price != null) data.price = p.price;
       if (p.ends) data.ends = p.ends;
@@ -920,7 +995,9 @@ $("#i-go").addEventListener("click", async () => {
   });
   if (!res) { $("#i-go").disabled = false; return; }
   closeImport();
-  let msg = `Imported ${plural(fresh.length)}` + (ups.length ? ` and updated ${ups.length}` : "") + ".";
+  let msg = itype() === "fan"
+    ? `Linked ${plural(ups.length)}` + (fresh.length ? ` and added ${fresh.length} that weren’t entered yet` : "") + ". Linked cards are now live on each customer’s page."
+    : `Imported ${plural(fresh.length)}` + (ups.length ? ` and updated ${ups.length}` : "") + ".";
   if (res.unassigned.length) {
     ["#f-q", "#f-plat", "#f-st", "#f-batch"].forEach(s => { $(s).value = ""; }); $("#f-cust").value = "__none";
     ui.sel = new Set(res.unassigned);
