@@ -8,6 +8,20 @@ export const STAT = { live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid 
 export const pad6 = n => String(n).padStart(6, "0");
 export const plural = n => `${n} card${n === 1 ? "" : "s"}`;
 export const isSold = l => l.status === "sold" || l.status === "paid";
+export const PAYM = { venmo: "Venmo", paypal: "PayPal", check: "Check", other: "Other" };
+// "Venmo @handle", "PayPal you@x.com", "Check to 123 Main St…"
+export function payLine(c) {
+  if (!c || !c.payMethod) return "";
+  if (c.payMethod === "check") return "Check" + (c.mailing ? ` mailed to ${c.mailing}` : "");
+  if (c.payMethod === "other") return c.payTo || "Other";
+  return PAYM[c.payMethod] + (c.payTo ? ` ${c.payTo}` : "");
+}
+// What Wheelhouse owes this consignor right now: sold-but-unpaid cards at their rate, plus any carried-over balance.
+export function owedFor(c, listings) {
+  const rate = (c?.rate ?? 85) / 100;
+  const sold = listings.filter(l => l.cust === c.id && l.status === "sold");
+  return { cards: sold, amount: sold.reduce((s, l) => s + (l.price || 0) * rate, 0) + (c?.payable || 0) };
+}
 
 export function detect(url) {
   const u = (url || "").toLowerCase();
@@ -157,18 +171,20 @@ export function mountDashboard(root, pickerHtml) {
     const { customer: c, listings, batches } = data;
     if (!c) { q("name").textContent = "No account"; q("stats").innerHTML = ""; q("cards").innerHTML = '<div class="empty">No consignor selected.</div>'; return; }
     q("name").textContent = c.name;
-    q("contact").innerHTML = `<span class="code">${esc(c.code)}</span> · ${esc(c.email || "No email on file")} · ${esc(c.phone || "No phone on file")}`;
+    const pl = payLine(c);
+    q("contact").innerHTML = `<span class="code">${esc(c.code)}</span> · ${esc(c.email || "No email on file")} · ${esc(c.phone || "No phone on file")}<br>${pl ? `Payouts go by ${esc(pl)}` : "Payout method not set yet. Tell us how you’d like to be paid."}`;
     const rate = (c.rate ?? 85) / 100;
     const mine = listings;
     const live = mine.filter(l => l.status === "live"), liveVal = live.reduce((s, l) => s + (l.price || 0), 0);
     const thirty = Date.now() - 30 * 864e5, sold30 = mine.filter(l => isSold(l) && new Date(l.soldDate || 0) > thirty);
-    const owed = mine.filter(l => l.status === "sold").reduce((s, l) => s + (l.price || 0) * rate, 0);
+    const owed = mine.filter(l => l.status === "sold").reduce((s, l) => s + (l.price || 0) * rate, 0) + (c.payable || 0);
+    const lastPaid = (c.payouts || []).slice(-1)[0];
     const ending = live.filter(l => l.format === "auction" && endsSoon(l)).length;
     q("stats").innerHTML = [
       ["Live now", live.length, `${live.filter(l => l.plat === "fan").length} Fanatics · ${live.filter(l => l.plat === "pcs").length} PC Sportscards`],
       ["Current value", money(liveVal), "Asking prices plus current bids"],
       ["Sold, last 30 days", sold30.length, money(sold30.reduce((s, l) => s + (l.price || 0), 0)) + " gross"],
-      ["Payout pending", money(owed), `At your ${c.rate ?? 85}% rate` + (ending ? ` · ${ending} ending today` : "")],
+      ["Payout pending", money(owed), `At your ${c.rate ?? 85}% rate` + (c.payable ? ` · includes ${money(c.payable)} carried over` : "") + (lastPaid ? ` · last paid ${money(lastPaid.amount)} on ${fmtDay(lastPaid.date)}` : "") + (ending ? ` · ${ending} ending today` : "")],
     ].map(([k, v, s]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${s}</span></div>`).join("");
 
     const fp = q("plat").value;

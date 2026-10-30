@@ -65,9 +65,21 @@
           <div class="f"><label for="c-rate">Payout %</label><input id="c-rate" type="number" min="0" max="100" value="85"></div>
           <div class="f w3"><label for="c-email">Email (their login)</label><input id="c-email" type="email" placeholder="name@email.com" required></div>
           <div class="f w3"><label for="c-phone">Phone</label><input id="c-phone" type="tel" inputmode="tel" placeholder="(215) 555-0100"></div>
+          <div class="f"><label for="c-pay">Paid by</label><select id="c-pay"><option value="">Not set</option><option value="venmo">Venmo</option><option value="paypal">PayPal</option><option value="check">Check</option><option value="other">Other</option></select></div>
+          <div class="f w4"><label for="c-payto" id="c-payto-l">Payout details</label><input id="c-payto" placeholder="Venmo handle, PayPal email, or other details"></div>
+          <div class="f w4"><label for="c-mail">Mailing address (for checks)</label><input id="c-mail" placeholder="123 Main St, Wayne, PA 19087"></div>
+          <div class="f"><label for="c-payable">Carried-over payable</label><input id="c-payable" type="number" step="0.01" min="0" placeholder="0.00"></div>
+          <div class="f w6"><label class="itype" style="padding:8px 10px"><input type="checkbox" id="c-notify" checked><span>Email them about payouts</span></label></div>
           <div class="f w6"><div class="row"><button class="btn" type="submit" id="c-save">Add consignor</button><button class="btn ghost" type="button" id="c-cancel" hidden>Cancel</button><span class="detect" id="c-msg"></span></div></div>
         </form>
       </div>
+    </div>
+
+    <div class="panel" id="payouts">
+      <div class="row" style="justify-content:space-between"><h2>Payouts</h2><span class="muted num" id="p-total"></span></div>
+      <div class="muted" style="font-size:12px">Consignors with sold cards that haven’t been paid yet, plus any balance carried over from the old system. “Email” opens a message in your email app, already filled in. “Mark paid” moves their sold cards to Paid out and logs the payout on their page.</div>
+      <div class="tbl-wrap"><table class="btbl"><thead><tr><th>Consignor</th><th>Owed</th><th>Cards</th><th>Pays to</th><th>Last emailed</th><th></th></tr></thead><tbody id="p-body"></tbody></table></div>
+      <div class="detect" id="p-msg" role="status"></div>
     </div>
 
     <div class="panel" id="batches">

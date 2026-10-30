@@ -50,6 +50,8 @@ Each card, batch and photo carries a copy of the owner's email (`custEmail`). Th
 ## Everyday notes
 - **SKUs** are six digits (000001, 000002, …) and come from a shared counter, so two staff members adding cards at the same time never collide.
 - **PC Sportscards CSVs:** pick "PC Sportscards CSV", then choose the customer's batch under "Put these cards in a batch" if the whole file belongs to one person. Otherwise import, then assign from the selection bar. Re-uploading a newer CSV updates prices and statuses on cards already in the system (matched by eBay item number) instead of adding them twice.
+- **Consignor list import:** choose "Consignor list" and drop in the export from the old consignment system. Number becomes the consignor code, Default Split becomes their payout %, Payable carries over what they're owed, and payout info is read from Address Line 1 and Payment Method together (Venmo, PayPal, check with mailing address).
+- **Payouts:** the Payouts panel lists everyone owed money (sold cards at their split, plus anything carried over). "Email" opens a filled-in message in your email app, "Copy message" is the fallback, and "Mark paid" moves their sold cards to Paid out and logs the payout on their page. Consignors with Notifications turned off don't get an Email button.
 - **Photos** are shrunk in the browser before upload. Each batch holds up to 40.
 - **Customers create their own login.** Tell them to go to the site, choose “Create account”, and use the email you have on file for them. They verify it once by email. They stay signed in on that device, and “Forgot password?” emails them a reset link.
 - **Free-plan email limits:** 1,000 verification emails and 150 password-reset emails a day.

@@ -6,7 +6,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
-  fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard
+  fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor
 } from "./ui.js";
 import { setupGate, gateMarkup } from "./gate.js";
 
@@ -139,6 +139,7 @@ function renderStaff() {
   $("#a-cust").innerHTML = S.customers.length ? custOptions($("#a-cust").value || "") .replace(/^/, '<option value="">Choose…</option>') : '<option value="">Add a consignor first</option>';
   $("#a-batch").innerHTML = batchOptions($("#a-batch").value, '<option value="">No batch</option>');
   renderCustList();
+  renderPayouts();
   renderStaffList();
   renderBatches();
   renderLedger();
@@ -147,10 +148,10 @@ function renderStaff() {
 
 function renderCustList() {
   const q = $("#c-q").value.trim().toLowerCase();
-  const list = [...S.customers].sort(byName).filter(c => !q || (c.name + " " + c.code + " " + c.email + " " + (c.phone || "")).toLowerCase().includes(q));
+  const list = [...S.customers].sort(byName).filter(c => !q || [c.name, c.code, c.email, c.phone, c.payTo, c.company].join(" ").toLowerCase().includes(q));
   $("#custList").innerHTML = list.length ? list.map(c => {
     const mine = S.listings.filter(l => l.cust === c.id), live = mine.filter(l => l.status === "live").length;
-    return `<div class="cust"><span class="code">${esc(c.code)}</span><div style="min-width:0"><div style="font-weight:600">${esc(c.name)}</div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${esc(c.email || "No email")} · ${esc(c.phone || "No phone")}</div><div class="muted" style="font-size:12px">${c.rate ?? 85}% payout · ${live} live / ${mine.length} total</div></div><div class="row" style="gap:6px"><button class="btn ghost sm" type="button" data-edit="${c.id}">Edit</button><button class="btn ghost sm" type="button" data-view="${c.id}">View</button></div></div>`;
+    return `<div class="cust"><span class="code">${esc(c.code)}</span><div style="min-width:0"><div style="font-weight:600">${esc(c.name)}</div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${esc(c.email || "No email")} · ${esc(c.phone || "No phone")}</div><div class="muted" style="font-size:12px">${c.rate ?? 85}% payout · ${live} live / ${mine.length} total${c.payable ? ` · <span class="need">${money(c.payable)} carried over</span>` : ""}</div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">No payout method</span>'}${c.notify === false ? " · payout emails off" : ""}${c.payNote ? ` · ${esc(c.payNote)}` : ""}</div></div><div class="row" style="gap:6px"><button class="btn ghost sm" type="button" data-edit="${c.id}">Edit</button><button class="btn ghost sm" type="button" data-view="${c.id}">View</button></div></div>`;
   }).join("") : `<div class="empty">${S.customers.length ? "No consignors match that search." : "No consignors yet. Add one below."}</div>`;
 }
 
@@ -243,13 +244,24 @@ $("#addForm").addEventListener("submit", async e => {
 });
 
 /* ---------- consignors ---------- */
+// Codes follow the existing Wheelhouse pattern: initials, dash, number per initials (SA-01, SA-02…).
+function nextCode(name, codes) {
+  const words = name.replace(/[^A-Za-z\s]/g, " ").trim().split(/\s+/).filter(Boolean);
+  const init = (words.length > 1 ? words[0][0] + words[words.length - 1][0] : (words[0] || "XX").slice(0, 2)).toUpperCase().padEnd(2, "X");
+  let n = 1, code;
+  do { code = `${init}-${String(n++).padStart(2, "0")}`; } while (codes.has(code));
+  return code;
+}
+const PAY_HINT = { venmo: ["Venmo handle", "@their-handle"], paypal: ["PayPal email", "name@email.com"], check: ["Check notes (optional)", "Payable to, if different"], other: ["Payout details", "Cash App, Zelle, store credit…"], "": ["Payout details", "Venmo handle, PayPal email, or other details"] };
+function syncPayHint() { const [l, p] = PAY_HINT[$("#c-pay").value]; $("#c-payto-l").textContent = l; $("#c-payto").placeholder = p; }
+$("#c-pay").addEventListener("change", syncPayHint);
 function fmtPhone(v) {
   const d = String(v || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : String(v || "").trim();
 }
 let editingCust = "";
 function resetCustForm() {
-  editingCust = ""; ["#c-name", "#c-email", "#c-phone"].forEach(s => { $(s).value = ""; }); $("#c-rate").value = 85;
+  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable"].forEach(s => { $(s).value = ""; }); $("#c-rate").value = 85; $("#c-notify").checked = true; syncPayHint();
   $("#c-save").textContent = "Add consignor"; $("#c-cancel").hidden = true;
 }
 $("#c-phone").addEventListener("blur", e => { e.target.value = fmtPhone(e.target.value); });
@@ -263,10 +275,16 @@ $("#custForm").addEventListener("submit", async e => {
   if (clash) return say(`${email} is already the login for ${clash.name}. Each consignor needs their own email.`);
   if (phone && phone.replace(/\D/g, "").length < 10) return say("Enter a 10-digit phone number, or leave it blank.");
   const rate = parseFloat($("#c-rate").value); const r = isNaN(rate) ? 85 : rate;
+  const payMethod = $("#c-pay").value, payTo = $("#c-payto").value.trim(), mailing = $("#c-mail").value.trim();
+  if (payMethod === "venmo" && !payTo) return say("Enter their Venmo handle, or set Paid by to Not set.");
+  if (payMethod === "paypal" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payTo)) return say("Enter the email address on their PayPal account.");
+  if (payMethod === "check" && !mailing) return say("Enter a mailing address for their checks.");
+  const pv = parseFloat($("#c-payable").value), payable = isNaN(pv) || pv < 0 ? 0 : Math.round(pv * 100) / 100;
+  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, notify: $("#c-notify").checked };
   $("#c-save").disabled = true;
   await guarded($("#c-msg"), async () => {
     if (editingCust) {
-      const c = custById(editingCust), id = editingCust, ops = [["update", doc(db, "customers", id), { name, email, phone, rate: r, updatedAt: serverTimestamp() }]];
+      const c = custById(editingCust), id = editingCust, ops = [["update", doc(db, "customers", id), { name, email, phone, rate: r, ...extra, updatedAt: serverTimestamp() }]];
       if (c.email !== email) {
         S.listings.filter(l => l.cust === id).forEach(l => ops.push(upd(l.id, { custEmail: email })));
         S.batches.filter(b => b.cust === id).forEach(b => ops.push(["update", doc(db, "batches", b.id), { custEmail: email }]));
@@ -276,10 +294,8 @@ $("#custForm").addEventListener("submit", async e => {
       await commit(ops);
       say(`Saved ${name}.`);
     } else {
-      const init = name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase().padEnd(2, "X");
-      let n = S.customers.length + 1, code;
-      do { code = init + String(n++).padStart(2, "0"); } while (S.customers.some(c => c.code === code));
-      await setDoc(doc(col("customers")), { code, name, email, phone, rate: r, createdAt: serverTimestamp(), createdBy: me });
+      const code = nextCode(name, new Set(S.customers.map(c => c.code)));
+      await setDoc(doc(col("customers")), { code, name, email, phone, rate: r, ...extra, since: today(), createdAt: serverTimestamp(), createdBy: me });
       say(`Added ${name} as ${code}.`);
     }
     resetCustForm();
@@ -293,7 +309,70 @@ $("#custList").addEventListener("click", e => {
   if (ed) {
     const c = custById(ed); editingCust = ed;
     $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; $("#c-rate").value = c.rate ?? 85;
+    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || ""; $("#c-notify").checked = c.notify !== false; syncPayHint();
     $("#c-save").textContent = `Save ${c.code}`; $("#c-cancel").hidden = false; $("#c-msg").textContent = ""; $("#c-name").focus();
+  }
+});
+
+/* ---------- payouts ---------- */
+const SITE = "https://wheelhousecards.github.io";
+let paidArm = "";
+function payoutEmail(c, o) {
+  const first = (c.name || "").split(/\s+/)[0] || "there";
+  const lines = o.cards.slice(0, 15).map(l => `- SKU ${l.sku} · ${l.title}: sold for ${money(l.price)}, you receive ${money((l.price || 0) * (c.rate ?? 85) / 100)}`);
+  if (o.cards.length > 15) lines.push(`- …and ${o.cards.length - 15} more on your page`);
+  const body = [
+    `Hi ${first},`, "",
+    `You have a Wheelhouse consignment payout of ${money(o.amount)} coming your way.`, "",
+    ...(o.cards.length ? [`Cards sold (at your ${c.rate ?? 85}% rate):`, ...lines, ""] : []),
+    ...(c.payable ? [`Includes ${money(c.payable)} carried over from your previous balance.`, ""] : []),
+    payLine(c) ? `We’ll send it by ${payLine(c)}. If that’s changed, just reply and let us know.` : "How would you like to be paid: Venmo, PayPal or check? Reply with your handle, PayPal email or mailing address.",
+    "", `You can see all your cards and sales anytime at ${SITE}`, "", "Thanks,", "Wheelhouse",
+  ].join("\n");
+  return { subject: `Your Wheelhouse consignment payout: ${money(o.amount)}`, body };
+}
+function renderPayouts() {
+  const rows = S.customers.map(c => ({ c, o: owedFor(c, S.listings) })).filter(x => x.o.amount > 0.004).sort((a, b) => b.o.amount - a.o.amount);
+  $("#p-total").textContent = rows.length ? `${money(rows.reduce((s, x) => s + x.o.amount, 0))} owed to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
+  $("#p-body").innerHTML = rows.length ? rows.map(({ c, o }) => {
+    const canMail = c.email && c.notify !== false;
+    return `<tr data-c="${c.id}">
+      <td><span class="code">${esc(c.code)}</span> ${esc(c.name)}</td>
+      <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}</td>
+      <td class="num">${o.cards.length}</td>
+      <td style="max-width:240px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>'}</td>
+      <td class="num">${c.notifiedAt ? fmtDay(c.notifiedAt.slice(0, 10)) + (c.notifiedAmount != null && Math.abs(c.notifiedAmount - o.amount) > 0.004 ? `<div class="cert">was ${money(c.notifiedAmount)}</div>` : "") : '<span class="muted">Not yet</span>'}</td>
+      <td><div class="row" style="gap:6px;flex-wrap:nowrap">${canMail ? `<a class="btn ghost sm" data-pa="mail" href="#">Email</a><button class="btn ghost sm" type="button" data-pa="copy">Copy message</button>` : `<span class="muted" style="font-size:12px">${c.email ? "Payout emails off" : "No email"}</span>`}<button class="btn sm" type="button" data-pa="paid">${paidArm === c.id ? `Confirm ${money(o.amount)} paid` : "Mark paid"}</button></div></td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="6"><div class="empty">Nobody is owed a payout right now. Cards marked Sold show up here.</div></td></tr>';
+}
+$("#p-body").addEventListener("click", async e => {
+  const t = e.target.closest("[data-pa]"); if (!t) return;
+  const c = custById(t.closest("tr").dataset.c); if (!c) return;
+  const o = owedFor(c, S.listings), msg = $("#p-msg");
+  if (t.dataset.pa === "mail" || t.dataset.pa === "copy") {
+    e.preventDefault();
+    const m = payoutEmail(c, o);
+    if (t.dataset.pa === "mail") {
+      location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
+      msg.textContent = `Opened an email to ${c.email}. If nothing opened, use “Copy message” and paste it into your email.`;
+    } else {
+      try { await navigator.clipboard.writeText(`To: ${c.email}\nSubject: ${m.subject}\n\n${m.body}`); msg.textContent = `Copied the message for ${c.name}. Paste it into an email to ${c.email}.`; }
+      catch (err) { msg.textContent = "Your browser blocked copying. Use the Email button instead."; return; }
+    }
+    await guarded(msg, () => updateDoc(doc(db, "customers", c.id), { notifiedAt: now(), notifiedAmount: Math.round(o.amount * 100) / 100 }));
+    return;
+  }
+  if (t.dataset.pa === "paid") {
+    if (paidArm !== c.id) { paidArm = c.id; renderPayouts(); return; }
+    paidArm = "";
+    await guarded(msg, async () => {
+      const entry = { date: today(), amount: Math.round(o.amount * 100) / 100, cards: o.cards.length, method: c.payMethod || "", payTo: c.payMethod === "check" ? (c.mailing || "") : (c.payTo || ""), by: me };
+      const ops = o.cards.map(l => upd(l.id, { status: "paid" }));
+      ops.push(["update", doc(db, "customers", c.id), { payable: 0, payouts: [...(c.payouts || []), entry], notifiedAt: "", notifiedAmount: null }]);
+      await commit(ops);
+      msg.textContent = `Logged a ${money(entry.amount)} payout to ${c.name}. Their sold cards are now Paid out.`;
+    });
   }
 });
 
@@ -556,16 +635,52 @@ function cellStr(v) {
   if (typeof v === "number") return Number.isInteger(v) ? v.toFixed(0) : String(v);
   return String(v ?? "").trim();
 }
-// Columns for a consignor list. Order matters: email is matched before name so "Customer Email" isn't taken as the name.
+// Columns for a consignor list. Order matters: the first rule that matches a header claims it.
 const CFIELDS = [
+  { k: "code", label: "Consignor code", re: /^number$|^code$|consignor ?(code|#|id|number)|account ?(#|no|number)|cust.?id/i },
+  { k: "since", label: "Consignor since", re: /^created$|created on|date added|^since/i },
+  { k: "byName", label: "Created by", re: /created by|added by/i },
   { k: "email", label: "Email (their login)", re: /e-?mail/i },
-  { k: "first", label: "First name", re: /first/i },
-  { k: "last", label: "Last name", re: /last|surname/i },
-  { k: "name", label: "Full name", re: /name|consignor|customer|client/i },
   { k: "phone", label: "Phone", re: /phone|cell|mobile|tel/i },
-  { k: "rate", label: "Payout % (what they keep)", re: /payout|rate|split|percent|%/i },
-  { k: "code", label: "Consignor code", re: /code|account|cust.?id/i },
+  { k: "first", label: "First name", re: /first/i },
+  { k: "last", label: "Last name", re: /^last ?name$|surname|^last$/i },
+  { k: "name", label: "Full name", re: /^(full ?)?name$|^(consignor|customer|client)( name)?$/i },
+  { k: "company", label: "Company (used if no name)", re: /company|business/i },
+  { k: "balance", label: "Balance", re: /^balance/i },
+  { k: "payable", label: "Payable (owed now)", re: /payable|owed/i },
+  { k: "rate", label: "Split / payout %", re: /^payout$|payout ?%|split|^rate$|percent/i },
+  { k: "invType", label: "Inventory type", re: /inventory type/i },
+  { k: "pay1", label: "Payout info (Address line 1)", re: /address line 1|address 1|^address$|street|payout (info|details)/i },
+  { k: "pay2", label: "Payment method", re: /payment method|pay(out)? method|venmo|paypal/i },
+  { k: "addr2", label: "Address line 2", re: /address line 2|address 2/i },
+  { k: "city", label: "City", re: /^city$/i },
+  { k: "state", label: "State", re: /^state$/i },
+  { k: "zip", label: "Zip", re: /zip|postal/i },
+  { k: "notify", label: "Notifications", re: /notif|opt.?in|subscribe/i },
 ];
+// Payout info in old exports is free text spread over Address Line 1 and Payment Method:
+// "Venmo: @handle", "PayPal: x@y.com", "Check/Bill Pay", or a street address for checks.
+function parsePayout(p1, p2, a2, city, state, zip) {
+  const clean = s => String(s || "").trim();
+  const isAddr = s => /^\d+\s+[A-Za-z]/.test(s) && !/@/.test(s);
+  const street = [p1, a2].map(clean).filter(isAddr);
+  const pay = [p2, p1, a2].map(clean).filter(s => s && !isAddr(s));
+  const tail = [clean(city), [clean(state), clean(zip)].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const mailing = street.length || clean(city) ? [...street, tail].filter(Boolean).join(", ") : "";
+  let payMethod = "", payTo = "";
+  const notes = [];
+  for (const s of pay) {
+    let m, d = "";
+    if (/venmo/i.test(s) || /^@/.test(s)) { m = "venmo"; d = s.replace(/venmo/i, "").replace(/^[\s:@]+/, "").replace(/\s+/g, ""); d = d ? "@" + d : ""; }
+    else if (/paypal/i.test(s)) { m = "paypal"; d = (s.match(/[^\s@:]+@[^\s@]+\.[A-Za-z]{2,}/) || [""])[0].toLowerCase(); }
+    else if (/check|bill ?pay/i.test(s)) m = "check";
+    else { m = "other"; d = s; }
+    if (!payMethod) { payMethod = m; payTo = d; } else notes.push(s);
+  }
+  if (!payMethod && mailing) payMethod = "check";
+  return { payMethod, payTo, mailing, payNote: notes.join("; ") };
+}
+const money2 = v => { const n = parseFloat(String(v || "").replace(/[^0-9.-]/g, "")); return isNaN(n) ? 0 : Math.round(n * 100) / 100; };
 const fieldsFor = type => type === "cust" ? CFIELDS : FIELDS.filter(f => !f.only || f.only === type);
 function guessMap(headers, type) {
   const map = {}, used = new Set();
@@ -647,48 +762,63 @@ function planCust() {
   const m = imp.map;
   const byEmail = new Map(S.customers.filter(c => c.email).map(c => [c.email.toLowerCase(), c]));
   const byName = new Map(S.customers.map(c => [c.name.toLowerCase(), c]));
+  const byCode = new Map(S.customers.map(c => [c.code, c]));
   const codes = new Set(S.customers.map(c => c.code));
   const seen = new Set();
-  let n = S.customers.length + 1;
   return imp.rows.map(r => {
     const g = k => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
     let name = g("name") || [g("first"), g("last")].filter(Boolean).join(" ");
     if (g("name") && g("last") && !g("name").includes(g("last"))) name = [g("name"), g("last")].join(" ");
-    name = name.replace(/\s+/g, " ").trim();
+    const company = g("company");
+    name = (name || company).replace(/\s+/g, " ").trim();
     const email = g("email").toLowerCase();
     if (!name && !email) return null;
     const label = name || email;
-    if (!name) return { act: "skip", why: "No name", label, email };
+    if (!name) return { act: "skip", why: "No name or company", label, email };
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { act: "skip", why: "Email doesn’t look right", label, email };
     if (email && seen.has(email)) return { act: "skip", why: "Same email is in the file twice", label, email };
     if (email) seen.add(email);
-    const ex = (email && byEmail.get(email)) || (!email && byName.get(name.toLowerCase()));
+    const fileCode = g("code").toUpperCase().replace(/\s+/g, "");
+    const ex = (email && byEmail.get(email)) || (fileCode && byCode.get(fileCode) && byCode.get(fileCode).name.toLowerCase() === name.toLowerCase() && byCode.get(fileCode)) || (!email && byName.get(name.toLowerCase()));
     if (ex) return { act: "skip", why: `Already a consignor (${ex.code})`, label, email };
-    const phone = fmtPhone(g("phone"));
     let rate = parseFloat(g("rate").replace(/[^0-9.]/g, ""));
     if (rate > 0 && rate <= 1) rate = Math.round(rate * 1000) / 10;
     if (isNaN(rate) || rate < 0 || rate > 100) rate = 85;
-    let code = g("code").toUpperCase().replace(/\s+/g, "");
-    if (!code || codes.has(code)) {
-      const init = name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase().padEnd(2, "X");
-      do { code = init + String(n++).padStart(2, "0"); } while (codes.has(code));
-    }
+    const code = fileCode && !codes.has(fileCode) ? fileCode : nextCode(name, codes);
     codes.add(code);
-    return { act: "new", label: name, email, warn: email ? "" : "No email, so they can’t sign in until you add one", data: { code, name, email, phone, rate } };
+    const pay = parsePayout(g("pay1"), g("pay2"), g("addr2"), g("city"), g("state"), g("zip"));
+    const st = g("since"), sinceT = st ? Date.parse(st) : NaN;
+    const nv = g("notify");
+    const data = {
+      code, name, email, phone: fmtPhone(g("phone")), rate, ...pay,
+      company: company && company !== name ? company : "",
+      since: isNaN(sinceT) ? "" : new Date(sinceT).toISOString().slice(0, 10),
+      addedByName: g("byName"), invType: g("invType"),
+      balance: money2(g("balance")), payable: money2(g("payable")),
+      notify: nv ? !/^(false|no|n|0|off)$/i.test(nv) : true,
+    };
+    const warns = [];
+    if (!email) warns.push("No email, so they can’t sign in until you add one");
+    if (!pay.payMethod) warns.push("No payout method");
+    else if (pay.payMethod === "paypal" && !pay.payTo) warns.push("PayPal email missing");
+    else if (pay.payMethod === "check" && !pay.mailing) warns.push("No mailing address for checks");
+    if (fileCode && fileCode !== code) warns.push(`Code ${fileCode} was taken, so this one is ${code}`);
+    return { act: "new", label: name, email, warn: warns.join(" · "), data };
   }).filter(Boolean);
 }
 function renderCustImport() {
   $("#i-batchwrap").hidden = true;
-  $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Use either Full name, or First and Last name. People already in the system (same email) are skipped, so you can upload the same list again safely.";
-  $("#i-head").innerHTML = "<tr><th>Result</th><th>Name</th><th>Email</th><th>Phone</th><th>Payout</th></tr>";
+  $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Payout info is read from both Address Line 1 and Payment Method, and a street address with no Venmo or PayPal becomes a check. People already in the system (same email) are skipped, so you can upload the same list again safely.";
+  $("#i-head").innerHTML = "<tr><th>Result</th><th>Name</th><th>Email</th><th>Split</th><th>Paid by</th><th>Payable</th></tr>";
   const plan = planCust(), n = a => plan.filter(p => p.act === a).length;
-  const noEmail = plan.filter(p => p.act === "new" && !p.data.email).length;
-  $("#i-sum").innerHTML = `<span class="act-new">${n("new")} new consignor${n("new") === 1 ? "" : "s"}</span> · <span class="act-skip">${n("skip")} skipped</span>${noEmail ? ` · <span class="need">${noEmail} without an email</span>` : ""}`;
+  const fresh = plan.filter(p => p.act === "new");
+  const noEmail = fresh.filter(p => !p.data.email).length, noPay = fresh.filter(p => !p.data.payMethod).length, owed = fresh.reduce((s, p) => s + (p.data.payable || 0), 0);
+  $("#i-sum").innerHTML = `<span class="act-new">${n("new")} new consignor${n("new") === 1 ? "" : "s"}</span> · <span class="act-skip">${n("skip")} skipped</span>${noEmail ? ` · <span class="need">${noEmail} without an email</span>` : ""}${noPay ? ` · <span class="need">${noPay} without a payout method</span>` : ""}${owed ? ` · ${money(owed)} payable carried over` : ""}`;
   $("#i-prev").innerHTML = plan.slice(0, 10).map(p => {
     const d = p.data;
     const act = p.act === "new" ? `<span class="act-new">New · ${esc(d.code)}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
-    return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td style="overflow-wrap:anywhere">${esc(p.email || "")}${p.warn ? `<div class="cert">${esc(p.warn)}</div>` : ""}</td><td class="num">${d ? esc(d.phone) : ""}</td><td class="num">${d ? d.rate + "%" : ""}</td></tr>`;
-  }).join("") + (plan.length > 10 ? `<tr><td colspan="5" class="muted">…and ${plan.length - 10} more rows</td></tr>` : "");
+    return `<tr><td>${act}</td><td class="title">${esc(p.label)}${d && d.phone ? `<div class="cert">${esc(d.phone)}</div>` : ""}</td><td style="overflow-wrap:anywhere">${esc(p.email || "")}${p.warn ? `<div class="cert" style="white-space:normal">${esc(p.warn)}</div>` : ""}</td><td class="num">${d ? d.rate + "%" : ""}</td><td style="max-width:220px;overflow-wrap:anywhere">${d ? esc(payLine(d)) : ""}</td><td class="num">${d && d.payable ? money(d.payable) : ""}</td></tr>`;
+  }).join("") + (plan.length > 10 ? `<tr><td colspan="6" class="muted">…and ${plan.length - 10} more rows</td></tr>` : "");
   $("#i-go").disabled = !n("new");
   $("#i-go").textContent = n("new") ? `Add ${n("new")} consignor${n("new") === 1 ? "" : "s"}` : "Nothing to add";
 }
