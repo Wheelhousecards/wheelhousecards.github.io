@@ -174,3 +174,6 @@ footer{padding-block:24px 40px;color:var(--muted);font-size:12px;text-align:cent
 .dl dd{margin:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center;overflow-wrap:anywhere}
 .card-photo{width:min(320px,100%);max-height:420px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:var(--sunk);justify-self:start}
 .card .thumb{flex:none}
+.thumb.big{width:84px;height:84px}
+tr.sub td{background:var(--sunk);font-size:13px;padding-block:5px}
+#pcsort .bulkbar{position:sticky;top:0;z-index:2}

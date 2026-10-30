@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261030165757";
+import { db, logout } from "./firebase.js?v=20261030172120";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -7,16 +7,17 @@ import {
 import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
-  isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout
-} from "./ui.js?v=20261030165757";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030165757";
+  isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
+  isDropoff, ITEM_STAT, dropoffSummary, itemShare
+} from "./ui.js?v=20261030172120";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030172120";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
 // cards (thousands from the old system) load only when needed, so the app stays inside Firestore's free daily reads.
 // "removed" is a recycle bin: removed cards can be restored until they're deleted for good.
 const ACTIVE = ["curating", "live", "sold", "unsold"], PAST = ["paid", "returned", "removed"];
-const S = { imports: [], customers: [], active: [], hist: null, batches: [], staff: [], notes: {}, counters: {}, _all: null };
+const S = { pool: [], imports: [], customers: [], active: [], hist: null, batches: [], staff: [], notes: {}, counters: {}, _all: null };
 // S.all includes removed cards (for the Removed tab, restores and SKU checks); S.listings leaves them out.
 Object.defineProperty(S, "all", { get() {
   if (!S._all) {
@@ -79,7 +80,7 @@ async function commit(ops) {
   ops.forEach(([t, ref, data]) => {
     if (t !== "update" || !data || !("custEmail" in data)) return;
     const l = S.listings.find(x => x.id === ref.id);
-    if (l?.photo?.id && !fix.has(l.photo.id)) fix.set(l.photo.id, ["update", doc(db, "photos", l.photo.id), { cust: data.cust ?? l.cust ?? "", custEmail: data.custEmail }]);
+    [l?.photo, ...(l?.photos || [])].filter(p => p?.id && !fix.has(p.id)).forEach(p => fix.set(p.id, ["update", doc(db, "photos", p.id), { cust: data.cust ?? l.cust ?? "", custEmail: data.custEmail }]));
   });
   ops = [...ops, ...fix.values()];
   for (let i = 0; i < ops.length; i += 400) {
@@ -131,6 +132,7 @@ function listen() {
   unsubs.push(onSnapshot(col("batchNotes"), s => { S.notes = Object.fromEntries(s.docs.map(d => [d.id, d.data().notes || ""])); done("notes"); render(); }, fail));
   unsubs.push(onSnapshot(col("meta"), s => {
     const c = s.docs.find(d => d.id === "counters"); S.counters = c ? c.data() : {};
+    const pool = s.docs.find(d => d.id === "pcsPool"); S.pool = pool ? (pool.data().rows || []) : [];
     S.imports = s.docs.filter(d => d.id.startsWith("imp-")).map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.id.localeCompare(a.id));
     render();
   }, () => {}));
@@ -188,11 +190,10 @@ function renderCust() {
 }
 setInterval(() => { const a = document.activeElement; if (!a || !["INPUT", "SELECT", "TEXTAREA"].includes(a.tagName)) render(); }, 60000);
 
-createLightbox(batchById, async b => {
-  const snap = await getDocs(query(col("photos"), where("batch", "==", b.id)));
-  const byId = new Map(snap.docs.map(d => [d.id, d.data().data]));
-  return b.photos.map(p => byId.get(p.id) || p.thumb);
-});
+createLightbox(id => {
+  if (id.startsWith("L:")) { const l = S.all.find(x => x.id === id.slice(2)); return l && { id: l.id, label: l.title, photos: l.photos || [] }; }
+  return batchById(id);
+}, async b => Promise.all(b.photos.map(async p => { try { const d = await getDoc(doc(db, "photos", p.id)); return d.exists() ? d.data().data : p.thumb; } catch (e) { return p.thumb; } })));
 
 /* ---------- staff render ---------- */
 const byName = (a, b) => a.name.localeCompare(b.name);
@@ -209,6 +210,7 @@ function renderStaff() {
   $("#a-batch").innerHTML = batchOptions($("#a-batch").value, '<option value="">No batch</option>');
   renderCustList();
   renderPayouts();
+  renderSort();
   renderStaffList();
   renderBatches();
   renderLedger();
@@ -270,7 +272,7 @@ function renderLedger() {
       <td>${l.format === "bin" ? "Buy It Now" : "Auction"}</td>
       <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${money(cardPayout(l, custById(l.cust)))} to consignor</div>` : ""}</td>
       <td class="num">${l.status === "live" && l.format === "auction" ? esc(timeLeft(l.ends)) : PAST.includes(l.status) || l.status === "sold" ? esc(fmtDay((l.soldDate || l.added || "").slice(0, 10))) : ""}</td>
-      <td><select data-f="status" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select></td>
+      <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
       <td><button class="x" type="button" data-del aria-label="Remove SKU ${esc(l.sku)}">${delOne === l.id ? "Sure?" : "×"}</button></td></tr>`;
   }).join("") + (rows.length > 500 ? `<tr><td colspan="12" class="muted">Showing the first 500 of ${rows.length}. Search or filter to narrow it down.</td></tr>` : "")
@@ -423,6 +425,7 @@ const SFIELDS = [
 function openDetail(id) {
   const l = S.all.find(x => x.id === id); if (!l) return;
   openCard = id; stmt = null;
+  if (isDropoff(l)) return openDropDetail(l);
   const c = custById(l.cust), lot = isLot(l) || l.plat === "pcs";
   const v = x => esc(x ?? "");
   detail.open(cardDetailHtml(l, c, { staff: true }) + `
@@ -449,6 +452,38 @@ function openDetail(id) {
     </div>` : ""}`);
   loadFullPhoto(detail.body, loadPhoto);
 }
+function openDropDetail(l) {
+  const c = custById(l.cust), v = x => esc(x ?? "");
+  detail.open(cardDetailHtml(l, c, { staff: true }) + `
+    <div class="row">${(l.items || []).length ? `<button class="btn ghost sm" type="button" id="dx-back">Move selected cards back to the sorting list</button>` : ""}<span class="detect" id="dx-msg" role="status"></span></div>
+    <div style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:14px">
+      <h3>Drop-off photos</h3>
+      ${(l.photos || []).length ? `<div class="thumbs">${l.photos.map((p, i) => `<span class="thumb big"><img src="${p.thumb}" alt="Photo ${i + 1}"><button class="rm" type="button" data-drm="${i}" aria-label="Remove photo ${i + 1}">×</button></span>`).join("")}</div>` : ""}
+      <label class="drop"><input type="file" id="dx-photos" accept="image/*" multiple><span><b>Add photos</b> or drop them here</span></label>
+      <span class="detect" id="dx-pmsg" role="status"></span>
+    </div>
+    <form id="dx-form" class="form" autocomplete="off" style="border-top:1px solid var(--line);padding-top:14px">
+      <div class="f w6"><h3>Edit</h3></div>
+      <div class="f"><label for="dx-date">Dropped off</label><input id="dx-date" type="date" value="${v(l.dropDate)}"></div>
+      <div class="f"><label for="dx-n">Cards dropped off</label><input id="dx-n" type="number" min="0" step="1" value="${l.expected || ""}"></div>
+      <div class="f"><label for="dx-batch">PC batch</label><select id="dx-batch"><option value="">No batch</option>${pcsBatches().map(b => `<option value="${b.id}"${b.id === l.batch ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join("")}</select></div>
+      <div class="f w6"><label for="dx-cust">Customer</label><select id="dx-cust">${custOptions(l.cust)}</select></div>
+      <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="dx-fmsg" role="status"></span></div></div>
+    </form>`);
+}
+detail.body.addEventListener("submit", async e => {
+  if (e.target.id !== "dx-form") return;
+  e.preventDefault();
+  const l = S.all.find(x => x.id === openCard); if (!l) return;
+  const dropDate = $("#dx-date").value || l.dropDate, cust = $("#dx-cust").value;
+  const patch = { dropDate, expected: parseInt($("#dx-n").value, 10) || 0, batch: $("#dx-batch").value, title: `PC Sportscards drop-off · ${fmtDay(dropDate)}`, cust, custEmail: emailOf(cust) };
+  const ok = await guarded($("#dx-fmsg"), async () => {
+    const ops = [upd(l.id, patch)];
+    if (cust !== l.cust) (l.photos || []).forEach(p => ops.push(["update", doc(db, "photos", p.id), { cust, custEmail: emailOf(cust) }]));
+    await commit(ops); return true;
+  });
+  if (ok) { Object.assign(l, patch); openDropDetail(l); $("#dx-fmsg").textContent = "Saved."; }
+});
 // Other PC Sportscards cards in the same batch can share one photo.
 const photoMates = l => l.plat === "pcs" && l.batch ? S.listings.filter(x => x.id !== l.id && x.plat === "pcs" && x.batch === l.batch && x.cust === l.cust) : [];
 function photoSection(l) {
@@ -500,6 +535,28 @@ detail.body.addEventListener("submit", async e => {
   if (ok) { Object.assign(l, patch); openDetail(l.id); $("#d-msg").textContent = "Saved."; }
 });
 detail.body.addEventListener("change", async e => {
+  if (e.target.id === "dx-all") { detail.body.querySelectorAll("input.dx").forEach(x => { x.checked = e.target.checked; }); return; }
+  if (e.target.id === "dx-photos") {
+    const l = S.all.find(x => x.id === openCard); if (!l) return;
+    const files = [...e.target.files], msg = $("#dx-pmsg"); if (!files.length) return;
+    if ((l.photos || []).length + files.length > 30) { msg.textContent = "A drop-off can hold up to 30 photos."; return; }
+    msg.textContent = `Saving ${files.length} photo${files.length === 1 ? "" : "s"}…`;
+    const ok = await guarded(msg, async () => {
+      const add = [];
+      for (const f of files) {
+        const full = await fullPhoto(f), thumb = full && await shrink(f, 220, .7);
+        if (!full || !thumb) continue;
+        const ref = doc(col("photos"));
+        await setDoc(ref, { listing: l.id, cust: l.cust || "", custEmail: emailOf(l.cust), data: full, createdAt: serverTimestamp() });
+        add.push({ id: ref.id, thumb });
+      }
+      const photos = [...(l.photos || []), ...add];
+      await updateDoc(listingRef(l.id), { photos, updatedAt: serverTimestamp() });
+      l.photos = photos; return add.length;
+    });
+    if (ok != null) { openDropDetail(l); $("#dx-pmsg").textContent = `Added ${ok} photo${ok === 1 ? "" : "s"}.`; }
+    return;
+  }
   if (e.target.id === "d-photo") {
     const file = e.target.files[0]; if (!file) return;
     const l = S.listings.find(x => x.id === openCard); if (!l) return;
@@ -542,6 +599,30 @@ detail.body.addEventListener("change", async e => {
   if (k && stmt && e.target.id.startsWith("sm-")) { stmt.map[k] = parseInt(e.target.value, 10); e.target.blur(); renderStmt(); }
 });
 detail.body.addEventListener("click", async e => {
+  if (e.target.id === "dx-all") return;
+  if (e.target.id === "dx-back") {
+    const l = S.all.find(x => x.id === openCard); if (!l) return;
+    const idx = new Set([...detail.body.querySelectorAll("input.dx:checked")].map(x => +x.dataset.i));
+    if (!idx.size) { $("#dx-msg").textContent = "Tick the cards to move back first."; return; }
+    const back = l.items.filter((_, i) => idx.has(i)), keep = l.items.filter((_, i) => !idx.has(i));
+    if (back.some(x => x.status === "paid")) { $("#dx-msg").textContent = "Some of those cards were already paid out, so they can’t move back."; return; }
+    const ok = await guarded($("#dx-msg"), async () => {
+      await commit([upd(l.id, dropPatch(keep))]);
+      const ids = new Set((S.pool || []).map(r => r.pcsId));
+      await savePool([...(S.pool || []), ...back.filter(x => !ids.has(x.pcsId))]);
+      return true;
+    });
+    if (ok) { Object.assign(l, dropPatch(keep)); openDropDetail(l); $("#dx-msg").textContent = `Moved ${plural(back.length)} back to the sorting list.`; }
+    return;
+  }
+  const drm = e.target.dataset?.drm;
+  if (drm != null) {
+    const l = S.all.find(x => x.id === openCard); if (!l) return;
+    const p = l.photos[+drm], photos = l.photos.filter((_, i) => i !== +drm);
+    const ok = await guarded($("#dx-pmsg"), async () => { await updateDoc(listingRef(l.id), { photos, updatedAt: serverTimestamp() }); try { await deleteDoc(doc(db, "photos", p.id)); } catch (err) {} return true; });
+    if (ok) { l.photos = photos; openDropDetail(l); }
+    return;
+  }
   if (e.target.id === "d-photo-rm") {
     const l = S.listings.find(x => x.id === openCard); if (!l?.photo) return;
     const id = l.photo.id;
@@ -555,6 +636,128 @@ detail.body.addEventListener("click", async e => {
   const patch = { items, lotCount: items.length };
   const ok = await guarded($("#d-prev"), async () => { await updateDoc(listingRef(l.id), { ...patch, updatedAt: serverTimestamp() }); return true; });
   if (ok) { Object.assign(l, patch); openDetail(l.id); }
+});
+
+/* ---------- PC Sportscards sorting and drop-off SKUs ---------- */
+const dropPatch = items => { const sm = dropoffSummary(items); return { items, lotCount: items.length, status: sm.status, price: sm.gross || null }; };
+async function savePool(rows) {
+  // Keep the newest 3,000 so the list stays well under Firestore's 1 MB document limit.
+  rows = rows.sort((a, b) => (b.listed || "").localeCompare(a.listed || "")).slice(0, 3000);
+  await setDoc(doc(db, "meta", "pcsPool"), { rows, updatedAt: now() });
+  S.pool = rows;
+}
+const psSel = new Set();
+const pcsBatches = () => S.batches.filter(b => b.plat === "pcs").sort((a, b) => b.id.localeCompare(a.id));
+const dropoffsFor = cust => S.all.filter(l => isDropoff(l) && l.cust === cust && l.status !== "removed").sort((a, b) => (b.dropDate || "").localeCompare(a.dropDate || ""));
+async function newDropoff({ cust, dropDate, batch, expected = 0, items = [], photos = [] }) {
+  const sku = pad6(await reserve("sku", 1, maxSku()));
+  const ref = doc(col("listings"));
+  await setDoc(ref, {
+    kind: "dropoff", sku, cust, custEmail: emailOf(cust), batch: batch || "", plat: "pcs", url: "", item: "",
+    title: `PC Sportscards drop-off · ${fmtDay(dropDate)}`, grade: "Ungraded", cert: "", format: "auction",
+    dropDate, expected: expected || 0, photos, ends: "", soldDate: "", added: now(), addedBy: me, updatedAt: serverTimestamp(), ...dropPatch(items),
+  });
+  return { id: ref.id, sku };
+}
+function renderSort() {
+  const rows = S.pool || [];
+  const q = $("#ps-q").value.trim().toLowerCase(), st = $("#ps-st").value, day = $("#ps-day").value, hid = $("#ps-hidden").value === "1";
+  const days = [...rows.filter(r => !!r.hidden === hid).reduce((m, r) => m.set((r.listed || "").slice(0, 10), (m.get((r.listed || "").slice(0, 10)) || 0) + 1), new Map())].sort((a, b) => b[0].localeCompare(a[0]));
+  $("#ps-day").innerHTML = `<option value="">Any listing date</option>` + days.map(([d, n]) => `<option value="${d}"${d === day ? " selected" : ""}>Listed ${d ? fmtDay(d) : "(no date)"} · ${n}</option>`).join("");
+  const shown = rows.filter(r => !!r.hidden === hid && (!st || r.status === st) && (!day || (r.listed || "").startsWith(day)) && (!q || [r.title, r.pcsId].join(" ").toLowerCase().includes(q)));
+  for (const id of psSel) if (!rows.some(r => r.pcsId === id)) psSel.delete(id);
+  const unsorted = rows.filter(r => !r.hidden).length;
+  $("#ps-count").textContent = unsorted ? `${unsorted.toLocaleString()} unsorted` : "";
+  $("#pcsort").hidden = !rows.length && !dropoffCount();
+  $("#ps-body").innerHTML = shown.length ? shown.slice(0, 600).map(r => `<tr${psSel.has(r.pcsId) ? ' class="on"' : ""}><td><input type="checkbox" class="pss" data-id="${esc(r.pcsId)}"${psSel.has(r.pcsId) ? " checked" : ""} aria-label="Select ${esc(r.title)}"></td><td class="title">${esc(r.title)}<div class="cert">PC #${esc(r.pcsId)}</div></td><td><span class="st ${r.status}">${ITEM_STAT[r.status]}</span></td><td class="num">${r.listed ? fmtDay(r.listed.slice(0, 10)) : ""}</td><td class="num">${r.status === "sold" ? `${money(r.price)}<div class="cert">${money(r.net)} after fees</div>` : ""}</td></tr>`).join("") + (shown.length > 600 ? `<tr><td colspan="5" class="muted">Showing 600 of ${shown.length}. Filter by listing date to narrow it down.</td></tr>` : "")
+    : `<tr><td colspan="5"><div class="empty">${rows.length ? "No cards match these filters." : "Nothing to sort. Import the PC Sportscards export to bring in new cards."}</div></td></tr>`;
+  const vis = shown.slice(0, 600), k = vis.filter(r => psSel.has(r.pcsId)).length;
+  $("#ps-all").checked = vis.length > 0 && k === vis.length; $("#ps-all").indeterminate = k > 0 && k < vis.length;
+  $("#ps-bar").hidden = !psSel.size;
+  if (psSel.size) {
+    $("#ps-n").textContent = `${psSel.size} card${psSel.size === 1 ? "" : "s"} selected`;
+    const pc = $("#ps-cust").value;
+    if (document.activeElement !== $("#ps-cust")) $("#ps-cust").innerHTML = '<option value="">Choose customer…</option>' + custOptions(pc);
+    const cust = $("#ps-cust").value, ps = $("#ps-sku").value;
+    if (document.activeElement !== $("#ps-sku")) $("#ps-sku").innerHTML = '<option value="__new">New drop-off SKU</option>' + (cust ? dropoffsFor(cust).map(l => `<option value="${l.id}"${l.id === ps ? " selected" : ""}>Add to SKU ${esc(l.sku)} · ${l.dropDate ? fmtDay(l.dropDate) : ""} · ${(l.items || []).length}${l.expected ? ` of ${l.expected}` : ""} cards</option>`).join("") : "");
+    $("#ps-newwrap").hidden = $("#ps-sku").value !== "__new";
+    if (!$("#ps-date").value) $("#ps-date").value = today();
+    const pb = $("#ps-batch").value;
+    if (document.activeElement !== $("#ps-batch")) $("#ps-batch").innerHTML = '<option value="">No batch</option>' + pcsBatches().map(b => `<option value="${b.id}"${b.id === pb ? " selected" : ""}>Batch ${esc(b.id)}${b.ship ? ` · shipped ${fmtDay(b.ship)}` : ""}</option>`).join("");
+    $("#ps-batch").disabled = $("#ps-sku").value !== "__new";
+    $("#ps-go").textContent = $("#ps-sku").value === "__new" ? `Create SKU with ${psSel.size} card${psSel.size === 1 ? "" : "s"}` : `Add ${psSel.size} to that SKU`;
+    $("#ps-hide").textContent = hid ? "Put back in the list" : "Not consigned";
+  }
+  // drop-off form selects
+  if (document.activeElement !== $("#psn-cust")) $("#psn-cust").innerHTML = '<option value="">Choose customer…</option>' + custOptions($("#psn-cust").value);
+  if (document.activeElement !== $("#psn-batch")) { const v = $("#psn-batch").value; $("#psn-batch").innerHTML = '<option value="">No batch</option>' + pcsBatches().map(b => `<option value="${b.id}"${b.id === v ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join(""); }
+  if (!$("#psn-date").value) $("#psn-date").value = today();
+}
+const dropoffCount = () => S.all.some(isDropoff);
+["#ps-q", "#ps-st", "#ps-day", "#ps-hidden"].forEach(x => $(x).addEventListener("input", () => { if (x === "#ps-hidden") psSel.clear(); renderSort(); }));
+$("#ps-body").addEventListener("change", e => { const id = e.target.dataset.id; if (!id) return; e.target.checked ? psSel.add(id) : psSel.delete(id); renderSort(); });
+$("#ps-all").addEventListener("change", e => {
+  const ids = [...$("#ps-body").querySelectorAll("input.pss")].map(x => x.dataset.id);
+  ids.forEach(id => e.target.checked ? psSel.add(id) : psSel.delete(id)); renderSort();
+});
+["#ps-cust", "#ps-sku"].forEach(x => $(x).addEventListener("change", e => { e.target.blur(); renderSort(); }));
+$("#ps-clear").addEventListener("click", () => { psSel.clear(); renderSort(); });
+$("#ps-hide").addEventListener("click", async () => {
+  const hid = $("#ps-hidden").value === "1", n = psSel.size;
+  await guarded($("#ps-msg"), async () => {
+    await savePool((S.pool || []).map(r => psSel.has(r.pcsId) ? { ...r, hidden: !hid } : r));
+    $("#ps-msg").textContent = hid ? `Put ${plural(n)} back in the list.` : `Marked ${plural(n)} as not consigned. Find them under “Show only cards marked not consigned”.`;
+    psSel.clear();
+  });
+  renderSort();
+});
+$("#ps-go").addEventListener("click", async e => {
+  const cust = $("#ps-cust").value, target = $("#ps-sku").value, msg = $("#ps-msg");
+  if (!custById(cust)) { msg.textContent = "Choose the customer these cards belong to."; return; }
+  const picked = (S.pool || []).filter(r => psSel.has(r.pcsId)); if (!picked.length) return;
+  const items = picked.map(({ hidden, ...r }) => r);
+  e.target.disabled = true;
+  const res = await guarded(msg, async () => {
+    let id, sku;
+    if (target === "__new") {
+      const dropDate = $("#ps-date").value || today();
+      ({ id, sku } = await newDropoff({ cust, dropDate, batch: $("#ps-batch").value, items }));
+    } else {
+      const l = S.all.find(x => x.id === target); id = l.id; sku = l.sku;
+      await commit([upd(l.id, dropPatch([...(l.items || []), ...items]))]);
+    }
+    const ids = new Set(items.map(x => x.pcsId));
+    await savePool((S.pool || []).filter(r => !ids.has(r.pcsId)));
+    return { id, sku };
+  });
+  e.target.disabled = false;
+  if (res) {
+    msg.innerHTML = `Added ${plural(items.length)} to SKU <button class="linkbtn code" type="button" data-open="${res.id}">${esc(res.sku)}</button> for ${esc(custById(cust).name)}. Open it to add the drop-off photos.`;
+    psSel.clear(); $("#ps-sku").value = "__new"; renderSort();
+  }
+});
+// Log a drop-off at intake, before PC Sportscards lists anything.
+let psnPending = [];
+$("#psn-photos").addEventListener("change", async e => {
+  const files = [...e.target.files];
+  for (const f of files) { const full = await fullPhoto(f), thumb = full && await shrink(f, 220, .7); if (full && thumb) psnPending.push({ full, thumb }); }
+  e.target.value = "";
+  $("#psn-pending").innerHTML = psnPending.map((p, i) => `<span class="thumb"><img src="${p.thumb}" alt="Photo ${i + 1}"><button class="rm" type="button" data-rm="${i}" aria-label="Remove photo ${i + 1}">×</button></span>`).join("");
+});
+$("#psn-pending").addEventListener("click", e => { const i = e.target.dataset.rm; if (i == null) return; psnPending.splice(+i, 1); $("#psn-photos").dispatchEvent(new Event("change")); });
+$("#psn-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const cust = $("#psn-cust").value, msg = $("#psn-msg");
+  if (!custById(cust)) { msg.textContent = "Choose the customer."; return; }
+  const res = await guarded(msg, async () => {
+    const photos = [];
+    for (const p of psnPending) { const ref = doc(col("photos")); await setDoc(ref, { cust, custEmail: emailOf(cust), data: p.full, createdAt: serverTimestamp() }); photos.push({ id: ref.id, thumb: p.thumb }); }
+    return newDropoff({ cust, dropDate: $("#psn-date").value || today(), batch: $("#psn-batch").value, expected: parseInt($("#psn-n").value, 10) || 0, photos });
+  });
+  if (res) {
+    msg.innerHTML = `Created SKU <button class="linkbtn code" type="button" data-open="${res.id}">${esc(res.sku)}</button> for ${esc(custById(cust).name)}. When the cards show up in the list above, tick them and choose “Add to SKU ${esc(res.sku)}”.`;
+    psnPending = []; $("#psn-pending").innerHTML = ""; $("#psn-n").value = "";
+  }
 });
 
 /* ---------- payouts ---------- */
@@ -582,7 +785,7 @@ function renderPayouts() {
     return `<tr data-c="${c.id}">
       <td><span class="code">${esc(c.code)}</span> ${esc(c.name)}</td>
       <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}</td>
-      <td class="num">${o.cards.length}</td>
+      <td class="num">${o.count}</td>
       <td style="max-width:240px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>'}</td>
       <td class="num">${c.notifiedAt ? fmtDay(c.notifiedAt.slice(0, 10)) + (c.notifiedAmount != null && Math.abs(c.notifiedAmount - o.amount) > 0.004 ? `<div class="cert">was ${money(c.notifiedAmount)}</div>` : "") : '<span class="muted">Not yet</span>'}</td>
       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${canMail ? `<a class="btn ghost sm" data-pa="mail" href="#">Email</a><button class="btn ghost sm" type="button" data-pa="copy">Copy message</button>` : `<span class="muted" style="font-size:12px">${c.email ? "Payout emails off" : "No email"}</span>`}<button class="btn sm" type="button" data-pa="paid">${paidArm === c.id ? `Confirm ${money(o.amount)} paid` : "Mark paid"}</button></div></td>
@@ -610,8 +813,11 @@ $("#p-body").addEventListener("click", async e => {
     if (paidArm !== c.id) { paidArm = c.id; renderPayouts(); return; }
     paidArm = "";
     await guarded(msg, async () => {
-      const entry = { date: today(), amount: Math.round(o.amount * 100) / 100, cards: o.cards.length, method: c.payMethod || "", payTo: c.payMethod === "check" ? (c.mailing || "") : (c.payTo || ""), by: me };
+      const entry = { date: today(), amount: Math.round(o.amount * 100) / 100, cards: o.count, method: c.payMethod || "", payTo: c.payMethod === "check" ? (c.mailing || "") : (c.payTo || ""), by: me };
       const ops = o.cards.map(l => upd(l.id, { status: "paid" }));
+      const lots = new Map();
+      o.dropItems.forEach(x => lots.set(x.lot.id, x.lot));
+      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => x.status === "sold" ? { ...x, status: "paid", paidOut: today() } : x)))));
       ops.push(["update", doc(db, "customers", c.id), { payable: 0, payouts: [...(c.payouts || []), entry], notifiedAt: "", notifiedAmount: null }]);
       await commit(ops);
       msg.textContent = `Logged a ${money(entry.amount)} payout to ${c.name}. Their sold cards are now Paid out.`;
@@ -737,7 +943,7 @@ $("#bb-clear").addEventListener("click", () => { ui.sel.clear(); delArm = false;
 let editingBatch = "", pending = [], bDelArm = "";
 function renderBatches() {
   const pc = $("#b-cust").value;
-  $("#b-cust").innerHTML = S.customers.length ? '<option value="">Choose…</option>' + custOptions(pc) : '<option value="">Add a consignor first</option>';
+  $("#b-cust").innerHTML = '<option value="">Choose…</option>' + `<option value="__multi"${pc === "__multi" ? " selected" : ""}>Several customers (PC shipment)</option>` + custOptions(pc);
   const bc = $("#bf-cust").value; $("#bf-cust").innerHTML = custOptions(bc, true);
   if (!$("#b-recv").value && !editingBatch) $("#b-recv").value = today();
   const sort = $("#bf-sort").value, nm = b => custById(b.cust)?.name || "~";
@@ -753,18 +959,24 @@ function renderBatches() {
     const c = custById(b.cust), cards = cardsIn(b.id), sold = cards.filter(isSold).length, notes = S.notes[b.id];
     if (sort === "cust" && b.cust !== last) {
       last = b.cust; const mineB = list.filter(x => x.cust === b.cust);
-      html += `<tr class="grp"><td colspan="8">${c ? `<span class="code">${esc(c.code)}</span> ${esc(c.name)}` : "No customer"} <span class="muted" style="font-weight:400">· ${mineB.length} batch${mineB.length === 1 ? "" : "es"} · ${mineB.reduce((s, x) => s + (x.cards || cardsIn(x.id).length), 0)} cards</span></td></tr>`;
+      html += `<tr class="grp"><td colspan="8">${c ? `<span class="code">${esc(c.code)}</span> ${esc(c.name)}` : b.cust ? "No customer" : "Several customers (PC shipments)"} <span class="muted" style="font-weight:400">· ${mineB.length} batch${mineB.length === 1 ? "" : "es"} · ${mineB.reduce((s, x) => s + (x.cards || cardsIn(x.id).length), 0)} cards</span></td></tr>`;
     }
     html += `<tr data-b="${esc(b.id)}">
       <td><span class="code">${esc(b.id)}</span>${notes ? `<div class="cert" style="white-space:normal;max-width:180px">${esc(notes)}</div>` : ""}</td>
-      <td>${c ? esc(c.name) : "—"}</td>
+      <td>${c ? esc(c.name) : b.cust ? "—" : "Several customers"}</td>
       <td><span class="chip ${b.plat}">${b.plat === "fan" ? "Fanatics" : "PC Sportscards"}</span></td>
       <td class="num">${fmtDay(b.recv)}</td>
       <td class="num">${b.ship ? fmtDay(b.ship) : '<span class="need">Not shipped</span>'}</td>
-      <td class="num">${b.cards || cards.length} sent<div class="cert">${cards.length} listed · ${sold} sold</div></td>
+      <td class="num">${cards.some(isDropoff) ? (() => { const its = cards.filter(isDropoff).flatMap(d => d.items || []); return `${b.cards || its.length} sent<div class="cert">${cards.filter(isDropoff).length} drop-offs · ${its.length} itemized · ${its.filter(x => x.status === "sold" || x.status === "paid").length} sold</div>`; })() : `${b.cards || cards.length} sent<div class="cert">${cards.length} listed · ${sold} sold</div>`}</td>
       <td>${thumbsHtml(b, 3)}</td>
       <td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn ghost sm" type="button" data-ba="cards">Show cards</button><button class="btn ghost sm" type="button" data-ba="edit">Edit</button><button class="btn ghost sm" type="button" data-ba="del">${bDelArm === b.id ? "Click again to remove" : "Remove"}</button></div></td>
     </tr>`;
+    // PC shipments: one line per customer drop-off SKU inside the batch.
+    const drops = cards.filter(isDropoff).sort((a, b) => (custById(a.cust)?.name || "").localeCompare(custById(b.cust)?.name || "") || (a.dropDate || "").localeCompare(b.dropDate || ""));
+    drops.forEach(d => {
+      const dc = custById(d.cust), sm = dropoffSummary(d.items);
+      html += `<tr class="sub"><td></td><td colspan="7"><div class="row" style="gap:10px"><button class="linkbtn code" type="button" data-open="${d.id}">SKU ${esc(d.sku)}</button><span>${dc ? esc(dc.name) : "No customer"}</span><span class="muted">dropped off ${d.dropDate ? fmtDay(d.dropDate) : "?"} · ${(d.items || []).length}${d.expected ? ` of ${d.expected}` : ""} cards · ${sm.sold + sm.paid} sold · ${(d.photos || []).length} photo${(d.photos || []).length === 1 ? "" : "s"}</span>${(d.photos || []).length ? `<span class="thumbs">${d.photos.slice(0, 3).map((p, i) => `<button class="thumb" type="button" data-ph="L:${d.id}" data-i="${i}" aria-label="Photo ${i + 1}" style="width:32px;height:32px"><img src="${p.thumb}" alt=""></button>`).join("")}</span>` : ""}</div></td></tr>`;
+    });
   });
   $("#b-body").innerHTML = html || '<tr><td colspan="8"><div class="empty">No batches yet. Log one above when a customer drops off cards.</div></td></tr>';
 }
@@ -798,7 +1010,8 @@ $("#b-pending").addEventListener("click", e => { const i = e.target.dataset.rm; 
 $("#bForm").addEventListener("submit", async e => {
   e.preventDefault();
   const say = t => { $("#b-msg").textContent = t; };
-  const cust = $("#b-cust").value; if (!custById(cust)) return say("Choose the customer this batch belongs to.");
+  const cv = $("#b-cust").value, multi = cv === "__multi", cust = multi ? "" : cv;
+  if (!multi && !custById(cust)) return say("Choose the customer this batch belongs to, or Several customers for a PC shipment.");
   const recv = $("#b-recv").value, ship = $("#b-ship").value;
   if (!recv) return say("Enter the date you received the cards.");
   if (ship && ship < recv) return say("The ship date is before the date received. Check the dates.");
@@ -844,7 +1057,7 @@ $("#b-body").addEventListener("click", async e => {
     $("#ledger").scrollIntoView({ block: "start" });
   }
   if (a === "edit") {
-    editingBatch = id; bDelArm = ""; $("#b-cust").value = b.cust; $("#b-plat").value = b.plat; $("#b-cards").value = b.cards || "";
+    editingBatch = id; bDelArm = ""; $("#b-cust").value = b.cust || "__multi"; $("#b-plat").value = b.plat; $("#b-cards").value = b.cards || "";
     $("#b-recv").value = b.recv || ""; $("#b-ship").value = b.ship || ""; $("#b-notes").value = S.notes[id] || ""; pending = (b.photos || []).map(p => ({ ...p }));
     $("#b-save").textContent = `Save ${id}`; $("#b-cancel").hidden = false; $("#b-msg").textContent = ""; renderPending();
     $("#batches").scrollIntoView({ block: "start" });
@@ -1036,7 +1249,7 @@ function planImport() {
   const type = itype(), m = imp.map;
   const used = new Set(S.all.map(l => l.sku));
   let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
-  const byItem = new Map(S.listings.filter(l => l.item).map(l => [l.item, l]));
+  const byItem = new Map(S.all.filter(l => l.item).map(l => [l.item, l]));
   const seen = new Set(), pick = batchById($("#i-batch").value);
   return imp.rows.map(r => {
     const g = k => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
@@ -1068,6 +1281,7 @@ function planImport() {
     }
     if (!cust && bt) { cust = bt.cust; warn = ""; }
     const ex = item && byItem.get(item);
+    if (ex && ex.status === "removed") return { act: "skip", why: `Removed earlier (SKU ${ex.sku}). Restore it from the Removed tab to bring it back.`, label };
     if (ex) return { act: "update", label: title, target: ex, price, ends, status, cust, batch: bt ? bt.id : "", warn: "" };
     let sku = g("sku").replace(/\D/g, ""), auto = false;
     sku = sku && sku.length <= 6 ? pad6(sku) : "";
@@ -1172,82 +1386,91 @@ function pcsStatus(st) {
   return "";
 }
 const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1, 12).toISOString().slice(0, 10); };
+// PC Sportscards export → the unsorted list (meta/pcsPool), plus status updates for cards already sorted into drop-off SKUs.
+const PRANK = { live: 1, unsold: 1, sold: 2, paid: 3 };
 function planPcs() {
-  const m = imp.map, pick = batchById($("#i-batch").value);
+  const m = imp.map;
   const recent = parseInt($("#i-recent").value, 10) || 0;
   if (!$("#i-cutoff").value) $("#i-cutoff").value = firstOfMonth();
   const cutoff = $("#i-cutoff").value;
   const g = (r, k) => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
   const rows = imp.rows.map(r => ({ r, listed: isoDay(g(r, "listed")) })).sort((a, b) => b.listed.localeCompare(a.listed));
   const scan = recent ? rows.slice(0, recent) : rows;
-  const byPcs = new Map(S.all.filter(l => l.pcsId).map(l => [l.pcsId, l]));
-  const byItem = new Map(S.all.filter(l => l.item).map(l => [l.item, l]));
-  const used = new Set(S.all.map(l => l.sku)), seen = new Set();
-  let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
-  const plan = scan.map(({ r, listed }) => {
+  const inDrop = new Map();
+  S.all.filter(isDropoff).forEach(l => (l.items || []).forEach((x, i) => { if (x.pcsId) inDrop.set(x.pcsId, { lot: l, i }); }));
+  const inPool = new Map((S.pool || []).map(x => [x.pcsId, x]));
+  const asCard = new Map(S.all.filter(l => l.pcsId && !isDropoff(l)).map(l => [l.pcsId, l]));
+  const seen = new Set();
+  return scan.map(({ r, listed }) => {
     const pcsId = g(r, "pcsId").replace(/\.0+$/, ""), title = g(r, "title");
-    const url = g(r, "url"), d = url ? detect(url) : null, item = g(r, "item").replace(/\D/g, "") || (d ? d.item : "");
-    if (!pcsId && !title && !item) return null;
-    const label = title || (pcsId ? `Card #${pcsId}` : `Item #${item}`);
-    const key = pcsId || (item ? "item:" + item : "");
-    if (!key) return { act: "skip", why: "No PC Sportscards card # or eBay item #", label };
-    if (seen.has(key)) return { act: "skip", why: "Same card twice in the file", label };
-    seen.add(key);
-    if (!title) return { act: "skip", why: "No card title", label };
+    if (!pcsId && !title) return null;
+    const label = title || `Card #${pcsId}`;
+    if (!pcsId) return { act: "skip", why: "No PC Sportscards card #", label };
+    if (seen.has(pcsId)) return { act: "skip", why: "Same card # twice in the file", label };
+    seen.add(pcsId);
     const kind = m.status >= 0 ? pcsStatus(g(r, "status")) : "live";
     if (!kind) return { act: "skip", why: `Status “${g(r, "status")}”`, label };
-    const paidDate = isoDay(g(r, "paidDate")), soldDate = isoDay(g(r, "soldDate")) || paidDate;
-    const price = money2(g(r, "price")), net = money2(g(r, "net"));
     const status = kind === "received" ? "sold" : kind;
-    const ex = pcsId ? byPcs.get(pcsId) : byItem.get(item);
-    if (ex && ex.status === "removed") return { act: "skip", why: `Removed earlier (SKU ${ex.sku}). Restore it from the Removed tab to bring it back.`, label, same: true };
-    if (ex) {
-      // Never move a card backwards: paid-out stays paid out, and a sale isn't undone by an older row.
-      const rank = { curating: 0, live: 1, unsold: 1, sold: 2, paid: 3, returned: 3 };
-      const patch = {};
-      if (rank[status] > (rank[ex.status] ?? 0) || (ex.status === "live" && status === "unsold")) { patch.status = status; if (status === "sold" && !ex.soldDate) patch.soldDate = soldDate || now(); }
-      if (price && price !== ex.price) patch.price = price;
-      if ((status === "sold" || ex.status === "sold" || ex.status === "paid") && net && net !== ex.net) patch.net = net;
-      if (soldDate && !ex.soldDate && (status === "sold" || ex.status === "sold")) patch.soldDate = soldDate;
-      if (item && !ex.item) patch.item = item;
-      if (url && !ex.url) patch.url = url;
-      if (!Object.keys(patch).length) return { act: "skip", why: `No change (SKU ${ex.sku})`, label, same: true };
-      return { act: "update", target: ex, patch, label: ex.title, change: patch.status ? `${STAT[ex.status]} → ${STAT[patch.status]}` : patch.price ? `price ${money(patch.price)}` : "details" };
-    }
-    if (kind === "received" && paidDate && paidDate.slice(0, 10) < cutoff) return { act: "skip", why: "Paid before the cutoff (in an earlier monthly payout)", label, early: true };
-    while (used.has(pad6(next))) next++;
-    const sku = pad6(next++); used.add(sku);
+    const pcsPaid = isoDay(g(r, "paidDate")), soldDate = isoDay(g(r, "soldDate")) || pcsPaid;
+    const price = money2(g(r, "price")), net = money2(g(r, "net"));
     const gm = title.match(/\b(PSA|SGC|BGS|CGC|TAG|HGA)\s*(\d+(?:\.\d)?|Authentic|Auth)\b/i);
-    const grade = g(r, "grade") ? normGrade(g(r, "grade")) : gm ? `${gm[1].toUpperCase()} ${gm[2]}` : "Ungraded";
-    const ends = isoDay(g(r, "ends"));
-    return { act: "new", auto: true, label: title, data: {
-      sku, cust: pick ? pick.cust : "", batch: pick ? pick.id : "", plat: "pcs", url: url || (item ? "https://www.ebay.com/itm/" + item : ""), item, title, grade, cert: g(r, "cert"),
-      format: "auction", price: price || null, ...(status === "sold" && net ? { net } : {}), ends, status, soldDate: status === "sold" ? soldDate || now() : "", ...(pcsId ? { pcsId } : {}), ...(listed ? { listed } : {}),
-    } };
+    const fresh = { pcsId, title, status, listed, soldDate: status === "sold" ? soldDate : "", pcsPaid, price: price || null, net: status === "sold" ? net : null, grade: gm ? `${gm[1].toUpperCase()} ${gm[2]}` : "" };
+    // Already sorted into a drop-off: move its status forward, never backward.
+    const d = inDrop.get(pcsId);
+    if (d) {
+      const x = d.lot.items[d.i], patch = {};
+      if ((PRANK[status] || 0) > (PRANK[x.status] || 0) || (x.status === "live" && status === "unsold")) patch.status = status;
+      if (price && price !== x.price) patch.price = price;
+      if (status === "sold" && net && net !== x.net && x.status !== "paid") patch.net = net;
+      if (status === "sold" && soldDate && !x.soldDate) patch.soldDate = soldDate;
+      if (pcsPaid && !x.pcsPaid) patch.pcsPaid = pcsPaid;
+      if (!Object.keys(patch).length) return { act: "skip", why: "No change", label, same: true };
+      return { act: "item", lot: d.lot, i: d.i, patch, label, change: patch.status ? `${ITEM_STAT[x.status]} → ${ITEM_STAT[patch.status]}` : "sale details" };
+    }
+    const old = asCard.get(pcsId);
+    if (old) return { act: "skip", why: old.status === "removed" ? `Removed earlier (SKU ${old.sku})` : `Already a card (SKU ${old.sku})`, label, same: true };
+    const p = inPool.get(pcsId);
+    if (p) {
+      const changed = (PRANK[status] || 0) > (PRANK[p.status] || 0) || (p.status === "live" && status === "unsold") || (price && price !== p.price) || (status === "sold" && net !== p.net);
+      return changed ? { act: "poolupd", row: { ...p, ...fresh, hidden: p.hidden || false }, label, change: "updated in the unsorted list" } : { act: "skip", why: "Already in the unsorted list", label, same: true };
+    }
+    if (kind === "received" && pcsPaid && pcsPaid.slice(0, 10) < cutoff) return { act: "skip", why: "Paid before the cutoff (in an earlier monthly payout)", label, early: true };
+    return { act: "pool", row: fresh, label };
   }).filter(Boolean);
-  return plan;
 }
 function renderPcsImport() {
-  $("#i-batchwrap").hidden = false; $("#i-pcswrap").hidden = false;
-  $("#i-help").textContent = "Cards are matched by PC Sportscards’ card #, so re-uploading a newer export only adds new cards and updates sales. Sold cards use “Your Payout” (after PC Sportscards’ fees) with each consignor’s split.";
-  $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Status</th><th>Sale</th><th>Consignor</th></tr>";
+  $("#i-batchwrap").hidden = true; $("#i-pcswrap").hidden = false;
+  $("#i-help").textContent = "New cards go into the “Sort PC Sportscards cards” list, where you add each customer’s drop-off to its own SKU. Cards you’ve already sorted get their listed, sold and payout details updated. Matching uses PC Sportscards’ card #.";
+  $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Status</th><th>Sale</th></tr>";
   if (!S.hist) { $("#i-sum").textContent = "Checking for cards already in the system…"; $("#i-prev").innerHTML = ""; $("#i-go").disabled = true; return; }
   const plan = planPcs(), n = a => plan.filter(p => p.act === a).length;
   const recent = parseInt($("#i-recent").value, 10) || 0;
-  const fresh = plan.filter(p => p.act === "new"), unassigned = fresh.filter(p => !p.data.cust).length;
-  const by = st => fresh.filter(p => p.data.status === st).length;
-  $("#i-sum").innerHTML = `Read the newest ${recent ? Math.min(recent, imp.rows.length).toLocaleString() : imp.rows.length.toLocaleString()} of ${imp.rows.length.toLocaleString()} rows · <span class="act-new">${fresh.length} new</span> (${by("live")} listed, ${by("sold")} sold, ${by("unsold")} unsold) · <span class="act-upd">${n("update")} updated</span> · ${plan.filter(p => p.same).length} unchanged · <span class="act-skip">${plan.filter(p => p.early).length} paid before the cutoff</span>${unassigned ? ` · <span class="need">${unassigned} will need a consignor</span>` : ""}`;
-  const order = { update: 0, new: 1, skip: 2 };
+  $("#i-sum").innerHTML = `Read the newest ${(recent ? Math.min(recent, imp.rows.length) : imp.rows.length).toLocaleString()} of ${imp.rows.length.toLocaleString()} rows · <span class="act-new">${n("pool")} new to sort</span> · <span class="act-upd">${n("item")} updates to sorted cards</span>${n("poolupd") ? ` · ${n("poolupd")} updates to unsorted cards` : ""} · ${plan.filter(p => p.same).length} unchanged · <span class="act-skip">${plan.filter(p => p.early).length} paid before the cutoff</span>`;
+  const order = { item: 0, pool: 1, poolupd: 2, skip: 3 };
   $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).slice(0, 12).map(p => {
-    const d = p.data, c = d ? custById(d.cust) : p.target ? custById(p.target.cust) : null;
-    const act = p.act === "new" ? `<span class="act-new">New · SKU ${d.sku}</span>` : p.act === "update" ? `<span class="act-upd">SKU ${esc(p.target.sku)}: ${esc(p.change)}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
-    const st = d ? STAT[d.status] : p.patch?.status ? STAT[p.patch.status] : "";
-    const sale = d && d.status === "sold" ? `${money(d.price)}<div class="cert">${money(d.net)} after fees</div>` : "";
-    return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td>${st}</td><td class="num">${sale}</td><td>${p.act === "skip" ? "" : c ? esc(c.name) : '<span class="need">Needs consignor</span>'}</td></tr>`;
-  }).join("") + (plan.length > 12 ? `<tr><td colspan="5" class="muted">…and ${(plan.length - 12).toLocaleString()} more rows</td></tr>` : "");
-  const go = fresh.length + n("update");
+    const r = p.row;
+    const act = p.act === "pool" ? `<span class="act-new">New · to sort</span>` : p.act === "item" ? `<span class="act-upd">SKU ${esc(p.lot.sku)}: ${esc(p.change)}</span>` : p.act === "poolupd" ? `<span class="act-upd">Unsorted: updated</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
+    const st = r ? ITEM_STAT[r.status] : p.patch?.status ? ITEM_STAT[p.patch.status] : "";
+    const sale = r && r.status === "sold" ? `${money(r.price)}<div class="cert">${money(r.net)} after fees</div>` : "";
+    return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td>${st}</td><td class="num">${sale}</td></tr>`;
+  }).join("") + (plan.length > 12 ? `<tr><td colspan="4" class="muted">…and ${(plan.length - 12).toLocaleString()} more rows</td></tr>` : "");
+  const go = n("pool") + n("item") + n("poolupd");
   $("#i-go").disabled = !go;
-  $("#i-go").textContent = go ? `Add ${fresh.length} new` + (n("update") ? ` and update ${n("update")}` : "") : "Nothing new";
+  $("#i-go").textContent = go ? (n("pool") ? `Add ${n("pool")} to the sorting list` : "Save updates") + (n("item") ? ` and update ${n("item")} sorted cards` : "") : "Nothing new";
+}
+async function runPcsImport() {
+  const plan = planPcs();
+  const pool = new Map((S.pool || []).map(x => [x.pcsId, x]));
+  const added = [];
+  plan.forEach(p => { if (p.act === "pool") { pool.set(p.row.pcsId, p.row); added.push(p.row.pcsId); } if (p.act === "poolupd") pool.set(p.row.pcsId, p.row); });
+  const byLot = new Map();
+  plan.filter(p => p.act === "item").forEach(p => { const e = byLot.get(p.lot.id) || byLot.set(p.lot.id, { lot: p.lot, items: p.lot.items.map(x => ({ ...x })) }).get(p.lot.id); Object.assign(e.items[p.i], p.patch); });
+  const ops = [...byLot.values()].map(e => upd(e.lot.id, dropPatch(e.items)));
+  const updated = [...byLot.values()].map(e => ({ id: e.lot.id, before: { items: e.lot.items, status: e.lot.status, price: e.lot.price ?? null, lotCount: e.lot.lotCount ?? null } }));
+  for (let i = 0; i < ops.length; i += 400) await commit(ops.slice(i, i + 400));
+  if (added.length || plan.some(p => p.act === "poolupd")) await savePool([...pool.values()]);
+  await logImport({ kind: "pcs", file: imp.file, created: [], updated, poolAdded: added });
+  return { added: added.length, lots: byLot.size, items: plan.filter(p => p.act === "item").length };
 }
 function renderFanImport() {
   $("#i-batchwrap").hidden = false;
@@ -1430,14 +1653,14 @@ $("#i-unpaid").addEventListener("change", () => renderImport());
 /* import history and undo */
 const KIND = { full: "Wheelhouse sheet", pcs: "PC Sportscards export", fan: "Fanatics export", hist: "Consignment history" };
 async function logImport(entry) {
-  if (!entry.created.length && !entry.updated.length) return;
+  if (!entry.created.length && !entry.updated.length && !entry.poolAdded?.length) return;
   try { await setDoc(doc(db, "meta", "imp-" + Date.now()), { ...entry, at: now(), by: me, undone: false }); } catch (e) { console.error(e); }
 }
 let undoArm = "";
 function renderImports() {
   const list = (S.imports || []).slice(0, 6);
   $("#imp-log").hidden = !list.length;
-  $("#imp-rows").innerHTML = list.map(x => `<div class="staff-row"><span><b>${esc(KIND[x.kind] || "Import")}</b> · ${esc(x.file || "")} · ${new Date(x.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}<span class="muted"> · ${x.created.length} added${x.updated.length ? `, ${x.updated.length} updated` : ""}</span></span>${x.undone ? `<span class="muted" style="font-size:12px">Undone. Added cards are in the Removed tab.</span>` : `<button class="btn ghost sm" type="button" data-undo="${x.id}">${undoArm === x.id ? `Click again to undo` : "Undo"}</button>`}</div>`).join("");
+  $("#imp-rows").innerHTML = list.map(x => `<div class="staff-row"><span><b>${esc(KIND[x.kind] || "Import")}</b> · ${esc(x.file || "")} · ${new Date(x.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}<span class="muted"> · ${x.created.length + (x.poolAdded?.length || 0)} added${x.updated.length ? `, ${x.updated.length} updated` : ""}</span></span>${x.undone ? `<span class="muted" style="font-size:12px">Undone. Added cards are in the Removed tab.</span>` : `<button class="btn ghost sm" type="button" data-undo="${x.id}">${undoArm === x.id ? `Click again to undo` : "Undo"}</button>`}</div>`).join("");
 }
 $("#imp-rows").addEventListener("click", async e => {
   const id = e.target.dataset.undo; if (!id) return;
@@ -1451,10 +1674,11 @@ $("#imp-rows").addEventListener("click", async e => {
       ...x.updated.map(u => upd(u.id, u.before)),
     ];
     for (let i = 0; i < ops.length; i += 400) await commit(ops.slice(i, i + 400));
+    if (x.poolAdded?.length) { const drop = new Set(x.poolAdded); await savePool((S.pool || []).filter(r => !drop.has(r.pcsId))); }
     await updateDoc(doc(db, "meta", id), { undone: true, undoneAt: now(), undoneBy: me });
     return true;
   });
-  if (ok) $("#i-msg").textContent = `Undid that import: ${plural(x.created.length)} moved to the Removed tab${x.updated.length ? ` and ${x.updated.length} changes put back` : ""}. To reverse this, open the Removed tab and restore them.`;
+  if (ok) $("#i-msg").textContent = x.poolAdded?.length ? `Undid that import: ${x.poolAdded.length} cards taken off the sorting list${x.updated.length ? ` and ${x.updated.length} drop-offs put back` : ""}.` : `Undid that import: ${plural(x.created.length)} moved to the Removed tab${x.updated.length ? ` and ${x.updated.length} changes put back` : ""}. To reverse this, open the Removed tab and restore them.`;
   else renderImports();
 });
 $("#i-limit").addEventListener("change", e => { e.target.blur(); renderImport(); });
@@ -1499,6 +1723,14 @@ $("#i-go").addEventListener("click", async () => {
   const plan = itype() === "fan" ? planFan() : itype() === "pcs" ? planPcs() : planImport();
   const fresh = plan.filter(p => p.act === "new"), ups = plan.filter(p => p.act === "update");
   $("#i-go").disabled = true; $("#i-msg").textContent = "Importing…";
+  if (itype() === "pcs") {
+    const r = await guarded($("#i-msg"), runPcsImport);
+    if (!r) { $("#i-go").disabled = false; return; }
+    closeImport();
+    $("#i-msg").textContent = `Added ${r.added} cards to the sorting list` + (r.items ? ` and updated ${r.items} cards in ${r.lots} drop-off SKU${r.lots === 1 ? "" : "s"}` : "") + ".";
+    if (r.added) $("#pcsort").scrollIntoView({ block: "start" });
+    return;
+  }
   const res = await guarded($("#i-msg"), async () => {
     const autos = fresh.filter(p => p.auto), explicit = fresh.filter(p => !p.auto).map(p => parseInt(p.data.sku, 10));
     const floor = Math.max(maxSku(), ...explicit, 0);

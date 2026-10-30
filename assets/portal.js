@@ -1,9 +1,9 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261030165757";
+import { db, logout } from "./firebase.js?v=20261030172120";
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261030165757";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030165757";
-import { contact } from "./firebase-config.js?v=20261030165757";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261030172120";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030172120";
+import { contact } from "./firebase-config.js?v=20261030172120";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
@@ -14,12 +14,11 @@ $("#gate").innerHTML = gateMarkup("See your consigned cards",
 let unsubs = [], state = { customer: null, listings: [], batches: [] }, me = "";
 const dash = mountDashboard($("#dash"), "", { loadPhoto: async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; } });
 createLightbox(
-  id => state.batches.find(b => b.id === id),
-  async b => {
-    const snap = await getDocs(query(collection(db, "photos"), where("custEmail", "==", me), where("batch", "==", b.id)));
-    const byId = new Map(snap.docs.map(d => [d.id, d.data().data]));
-    return b.photos.map(p => byId.get(p.id) || p.thumb);
-  }
+  id => {
+    if (id.startsWith("L:")) { const l = state.listings.find(x => x.id === id.slice(2)); return l && { id: l.id, label: l.title, photos: l.photos || [] }; }
+    return state.batches.find(b => b.id === id);
+  },
+  async b => Promise.all(b.photos.map(async p => { try { const d = await getDoc(doc(db, "photos", p.id)); return d.exists() ? d.data().data : p.thumb; } catch (e) { return p.thumb; } }))
 );
 
 function stop() { unsubs.forEach(u => u()); unsubs = []; }

@@ -19,10 +19,26 @@ export function payLine(c) {
 // The consignor's share of one sale. Cards imported from the old system carry their exact portion.
 // PC Sportscards cards carry their payout after PC Sportscards' fees (net); the consignor's split applies to that.
 export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.net != null ? l.net : (l.price || 0)) * (c?.rate ?? 85) / 100;
+/* ---------- PC Sportscards drop-offs ----------
+   A drop-off is one SKU for one customer's drop-off. Its cards live in items[], each with its own
+   PC Sportscards status: live, sold (PC Sportscards sold it, Wheelhouse hasn't paid the consignor yet),
+   paid (paid out to the consignor) or unsold. */
+export const isDropoff = l => !!(l && l.kind === "dropoff");
+export const ITEM_STAT = { live: "Listed", sold: "Sold", paid: "Paid out", unsold: "Unsold" };
+export const itemShare = (x, c) => (x.net != null ? x.net : (x.price || 0)) * (c?.rate ?? 85) / 100;
+export function dropoffSummary(items = []) {
+  const n = k => items.filter(x => x.status === k).length;
+  const soldItems = items.filter(x => x.status === "sold" || x.status === "paid");
+  const status = !items.length ? "curating" : n("live") ? "live" : n("sold") ? "sold" : n("paid") ? "paid" : "unsold";
+  return { status, live: n("live"), sold: n("sold"), paid: n("paid"), unsold: n("unsold"), gross: soldItems.reduce((s, x) => s + (x.price || 0), 0), net: soldItems.reduce((s, x) => s + (x.net || 0), 0) };
+}
 // What Wheelhouse owes this consignor right now: sold-but-unpaid cards at their rate, plus any carried-over balance.
 export function owedFor(c, listings) {
-  const sold = listings.filter(l => l.cust === c.id && l.status === "sold");
-  return { cards: sold, amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + (c?.payable || 0) };
+  const mine = listings.filter(l => l.cust === c.id);
+  const sold = mine.filter(l => l.status === "sold" && !isDropoff(l));
+  const dropItems = mine.filter(isDropoff).flatMap(l => (l.items || []).filter(x => x.status === "sold").map(x => ({ ...x, lot: l })));
+  return { cards: sold, dropItems, count: sold.length + dropItems.length,
+    amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + dropItems.reduce((s, x) => s + itemShare(x, c), 0) + (c?.payable || 0) };
 }
 
 export function detect(url) {
@@ -87,9 +103,13 @@ export function shrink(file, maxPx, quality) {
 
 /* ---------- card details ---------- */
 // A "lot" is one SKU standing for many cards, like a monthly PC Sportscards payout.
-export const isLot = l => !!(l && (l.lotCount > 1 || (l.items && l.items.length > 1) || /multi.?lot/i.test(l.title || "")));
+export const isLot = l => !!(l && (l.kind === "dropoff" || l.lotCount > 1 || (l.items && l.items.length > 1) || /multi.?lot/i.test(l.title || "")));
 export function lotLine(l) {
   const n = l.items?.length || l.lotCount || 0;
+  if (isDropoff(l)) {
+    const sm = dropoffSummary(l.items);
+    return [l.dropDate ? `Dropped off ${fmtDay(l.dropDate)}` : "", n ? `${n} card${n === 1 ? "" : "s"}` : (l.expected ? `${l.expected} cards, not itemized yet` : ""), sm.sold + sm.paid ? `${sm.sold + sm.paid} sold` : "", sm.live ? `${sm.live} listed` : ""].filter(Boolean).join(" · ");
+  }
   return [n ? `${n} card${n === 1 ? "" : "s"}` : "", l.period ? (l.plat === "pcs" ? `${l.period} payout` : l.period) : ""].filter(Boolean).join(" · ");
 }
 const fmtLong = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
@@ -112,14 +132,22 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     ...(l.url ? [["Listing", `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open on ${PLAT[l.plat] || "the site"}</a>`]] : []),
   ];
   let lot = "";
-  if (isLot(l)) {
+  if (isDropoff(l)) {
+    const items = l.items || [], sm = dropoffSummary(items);
+    const head = `Cards in this drop-off (${items.length}${l.expected && l.expected !== items.length ? ` of ${l.expected} dropped off` : ""})`;
+    lot = `<div style="display:grid;gap:8px"><h3>${head}</h3>` + (items.length
+      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${x.pcsId ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}</td><td><span class="st ${x.status === "live" ? "live" : x.status}">${ITEM_STAT[x.status] || esc(x.status)}</span></td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? money(itemShare(x, c)) : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
+      : `<div class="empty" style="padding:16px">${staff ? "No cards in this drop-off yet. Select them in the PC Sportscards sorting list and add them here." : "We’re itemizing the cards from this drop-off. They’ll show up here once PC Sportscards lists them."}</div>`) + `</div>`;
+  } else if (isLot(l)) {
     const items = l.items || [];
     const gross = items.reduce((s, x) => s + (x.price || 0), 0), net = items.reduce((s, x) => s + (x.net || 0), 0);
     lot = `<div style="display:grid;gap:8px"><h3>Cards in this ${l.plat === "pcs" ? "payout" : "lot"}${l.lotCount || items.length ? ` (${items.length || l.lotCount})` : ""}</h3>` + (items.length
       ? `<div class="tbl-wrap"><table class="prev" style="min-width:520px"><thead><tr><th>Card</th><th>Sold</th><th>Price</th>${items.some(x => x.net != null) ? "<th>After fees</th>" : ""}<th>Item #</th></tr></thead><tbody>${items.map(x => `<tr><td class="title">${esc(x.title)}</td><td class="num">${x.date ? fmtLong(x.date) : ""}</td><td class="num">${x.price != null ? money(x.price) : ""}</td>${items.some(y => y.net != null) ? `<td class="num">${x.net != null ? money(x.net) : ""}</td>` : ""}<td class="code">${esc(x.item || "")}</td></tr>`).join("")}<tr class="grp"><td>Total</td><td></td><td class="num">${money(gross)}</td>${items.some(x => x.net != null) ? `<td class="num">${money(net)}</td>` : ""}<td></td></tr></tbody></table></div>`
       : `<div class="empty" style="padding:16px">${staff ? `The individual cards for this ${l.plat === "pcs" ? "payout" : "lot"} haven’t been added yet. Upload the PC Sportscards statement below.` : "The card-by-card breakdown for this payout hasn’t been added yet. Ask us if you’d like it."}</div>`) + `</div>`;
   }
-  const photo = l.photo ? `<img class="card-photo" data-photo="${esc(l.photo.id)}" src="${l.photo.thumb}" alt="Photo of ${esc(l.title)}">` : "";
+  const photo = l.photos?.length
+    ? `<div style="display:grid;gap:6px"><h3>${isDropoff(l) ? "Photos from drop-off" : "Photos"}</h3><div class="thumbs">${l.photos.map((p, i) => `<button class="thumb big" type="button" data-ph="L:${esc(l.id)}" data-i="${i}" aria-label="Open photo ${i + 1}"><img src="${p.thumb}" alt=""></button>`).join("")}</div></div>`
+    : l.photo ? `<img class="card-photo" data-photo="${esc(l.photo.id)}" src="${l.photo.thumb}" alt="Photo of ${esc(l.title)}">` : "";
   return `<div style="display:grid;gap:14px">
     ${photo}
     <div><div class="muted" style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">${isLot(l) ? esc(lotLine(l) || "Lot") : "Card details"}</div><h2 style="text-transform:none;letter-spacing:0;font-size:24px">${esc(l.title)}</h2></div>
@@ -159,7 +187,7 @@ export function createLightbox(getBatch, loadFull) {
     img.src = (full && full[i]) || batch.photos[i].thumb;
     img.alt = `Photo ${i + 1} of ${n}`;
     load.hidden = !!(full && full[i]);
-    cap.textContent = `Batch ${batch.id} · photo ${i + 1} of ${n}`;
+    cap.textContent = `${batch.label || `Batch ${batch.id}`} · photo ${i + 1} of ${n}`;
     $(".lb-p", box).hidden = $(".lb-n", box).hidden = n < 2;
   }
   function open(b, idx) {
@@ -253,7 +281,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto } = {}) {
     const mine = listings.filter(l => l.status !== "removed");
     const live = mine.filter(l => l.status === "live"), liveVal = live.reduce((s, l) => s + (l.price || 0), 0);
     const thirty = Date.now() - 30 * 864e5, sold30 = mine.filter(l => isSold(l) && new Date(l.soldDate || 0) > thirty);
-    const owed = mine.filter(l => l.status === "sold").reduce((s, l) => s + cardPayout(l, c), 0) + (c.payable || 0);
+    const owed = owedFor(c, mine).amount;
     const lastPaid = (c.payouts || []).slice(-1)[0];
     const ending = live.filter(l => l.format === "auction" && endsSoon(l)).length;
     q("stats").innerHTML = [
@@ -306,7 +334,13 @@ export function mountDashboard(root, pickerHtml, { loadPhoto } = {}) {
     q("cards").innerHTML = banner + (list.length ? list.map(l => {
       const tl = l.format === "auction" && l.status === "live" ? timeLeft(l.ends) : "";
       let label, sub;
-      if (l.status === "live") { label = l.format === "bin" ? "Asking" : "Current bid"; sub = l.format === "bin" ? "Buy It Now" : (tl ? `<span class="${endsSoon(l) ? "soon" : ""}">Ends in ${tl}</span>` : "Auction"); }
+      if (isDropoff(l)) {
+        const sm = dropoffSummary(l.items), share = (l.items || []).filter(x => x.status === "sold" || x.status === "paid").reduce((t, x) => t + itemShare(x, c), 0);
+        label = sm.sold + sm.paid ? "Sold so far" : "PC Sportscards";
+        sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `You receive ${money(share)}` : `${sm.live} listed on eBay`;
+        l = { ...l, price: sm.sold + sm.paid ? sm.gross : null };
+      }
+      else if (l.status === "live") { label = l.format === "bin" ? "Asking" : "Current bid"; sub = l.format === "bin" ? "Buy It Now" : (tl ? `<span class="${endsSoon(l) ? "soon" : ""}">Ends in ${tl}</span>` : "Auction"); }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
       else if (isSold(l)) { label = "Sold for"; sub = `You receive ${money(cardPayout(l, c))}` + (l.status === "paid" ? " · paid" : ""); }
       else if (l.status === "returned") { label = "Returned to you"; sub = ""; }
@@ -316,7 +350,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto } = {}) {
           <div class="t">${esc(l.title)}</div>
           <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
         </div></div>
-        <div class="right"><span class="sub">${label}</span><span class="amt">${l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
+        <div class="right"><span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
       </article>`;
     }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
   }
