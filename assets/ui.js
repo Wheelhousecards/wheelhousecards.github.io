@@ -84,6 +84,61 @@ export function shrink(file, maxPx, quality) {
   });
 }
 
+/* ---------- card details ---------- */
+// A "lot" is one SKU standing for many cards, like a monthly PC Sportscards payout.
+export const isLot = l => !!(l && (l.lotCount > 1 || (l.items && l.items.length > 1) || /multi.?lot/i.test(l.title || "")));
+export function lotLine(l) {
+  const n = l.items?.length || l.lotCount || 0;
+  return [n ? `${n} card${n === 1 ? "" : "s"}` : "", l.period ? (l.plat === "pcs" ? `${l.period} payout` : l.period) : ""].filter(Boolean).join(" · ");
+}
+const fmtLong = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+// Read-only details shared by the customer page and the staff app.
+export function cardDetailHtml(l, c, { staff = false } = {}) {
+  const rate = c?.rate ?? 85, sold = isSold(l);
+  const rows = [
+    ["SKU", `<span class="code">${esc(l.sku)}</span>`],
+    ["Status", `<span class="st ${l.status}">${STAT[l.status] || esc(l.status)}</span>`],
+    ["Auction house", `<span class="chip ${l.plat}">${PLAT[l.plat] || "Other"}</span>`],
+    ...(l.period ? [[l.plat === "pcs" ? "Payout month" : "Auction", esc(l.period)]] : []),
+    ["Grade", gradeHtml(l, false)],
+    ...(staff && c ? [["Consignor", `<span class="code">${esc(c.code)}</span> ${esc(c.name)}`]] : []),
+    ...(l.batch ? [["Batch", `<span class="code">${esc(l.batch)}</span>`]] : []),
+    ...(l.added ? [["Added", fmtLong(l.added)]] : []),
+    ...(l.status === "live" ? [[l.format === "bin" ? "Asking price" : "Current bid", money(l.price)], ...(l.format === "auction" && l.ends ? [["Ends", `${fmtLong(l.ends)} (${timeLeft(l.ends)})`]] : [])] : []),
+    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], [staff ? "Consignor portion" : "Your share", money(l.payout != null ? l.payout : (l.price || 0) * rate / 100) + (l.payout == null ? ` (at ${rate}%)` : "")]] : []),
+    ...(l.item ? [["eBay / listing #", `<span class="code">${esc(l.item)}</span>`]] : []),
+    ...(l.url ? [["Listing", `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open on ${PLAT[l.plat] || "the site"}</a>`]] : []),
+  ];
+  let lot = "";
+  if (isLot(l)) {
+    const items = l.items || [];
+    const gross = items.reduce((s, x) => s + (x.price || 0), 0), net = items.reduce((s, x) => s + (x.net || 0), 0);
+    lot = `<div style="display:grid;gap:8px"><h3>Cards in this ${l.plat === "pcs" ? "payout" : "lot"}${l.lotCount || items.length ? ` (${items.length || l.lotCount})` : ""}</h3>` + (items.length
+      ? `<div class="tbl-wrap"><table class="prev" style="min-width:520px"><thead><tr><th>Card</th><th>Sold</th><th>Price</th>${items.some(x => x.net != null) ? "<th>After fees</th>" : ""}<th>Item #</th></tr></thead><tbody>${items.map(x => `<tr><td class="title">${esc(x.title)}</td><td class="num">${x.date ? fmtLong(x.date) : ""}</td><td class="num">${x.price != null ? money(x.price) : ""}</td>${items.some(y => y.net != null) ? `<td class="num">${x.net != null ? money(x.net) : ""}</td>` : ""}<td class="code">${esc(x.item || "")}</td></tr>`).join("")}<tr class="grp"><td>Total</td><td></td><td class="num">${money(gross)}</td>${items.some(x => x.net != null) ? `<td class="num">${money(net)}</td>` : ""}<td></td></tr></tbody></table></div>`
+      : `<div class="empty" style="padding:16px">${staff ? `The individual cards for this ${l.plat === "pcs" ? "payout" : "lot"} haven’t been added yet. Upload the PC Sportscards statement below.` : "The card-by-card breakdown for this payout hasn’t been added yet. Ask us if you’d like it."}</div>`) + `</div>`;
+  }
+  return `<div style="display:grid;gap:14px">
+    <div><div class="muted" style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">${isLot(l) ? esc(lotLine(l) || "Lot") : "Card details"}</div><h2 style="text-transform:none;letter-spacing:0;font-size:24px">${esc(l.title)}</h2></div>
+    <dl class="dl">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+    ${lot}
+  </div>`;
+}
+// Simple modal used for card details.
+export function createModal() {
+  const box = document.createElement("div");
+  box.className = "modal"; box.hidden = true;
+  box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true"); box.setAttribute("aria-label", "Card details");
+  box.innerHTML = `<div class="modal-card"><button class="lb-x modal-x" type="button" aria-label="Close">×</button><div class="modal-body"></div></div>`;
+  document.body.appendChild(box);
+  let back = null;
+  const body = $(".modal-body", box);
+  const close = () => { box.hidden = true; body.innerHTML = ""; back?.focus?.(); };
+  $(".modal-x", box).addEventListener("click", close);
+  box.addEventListener("click", e => { if (e.target === box) close(); });
+  document.addEventListener("keydown", e => { if (!box.hidden && e.key === "Escape") close(); });
+  return { body, open(html) { back = document.activeElement; body.innerHTML = html; box.hidden = false; $(".modal-x", box).focus(); }, close, get isOpen() { return !box.hidden; } };
+}
+
 /* ---------- photo viewer ---------- */
 // loadFull(batch) → Promise<string[]> of full-size images in the same order as batch.photos
 export function createLightbox(getBatch, loadFull) {
@@ -169,6 +224,12 @@ export function mountDashboard(root, pickerHtml) {
     tab = t; [...q("tabs").children].forEach(b => b.setAttribute("aria-pressed", b.dataset.t === t)); render();
   });
   q("plat").addEventListener("change", () => render());
+  const modal = createModal();
+  root.addEventListener("click", e => {
+    const t = e.target.closest("[data-card]"); if (!t || !data) return;
+    const l = data.listings.find(x => x.id === t.dataset.card);
+    if (l) modal.open(cardDetailHtml(l, data.customer));
+  });
 
   function render(next) {
     if (next) data = next;
@@ -243,7 +304,7 @@ export function mountDashboard(root, pickerHtml) {
       return `<article class="card">
         <div style="display:grid;gap:6px;min-width:0">
           <div class="t">${esc(l.title)}</div>
-          <div class="meta"><span class="code">SKU ${esc(l.sku)}</span>${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
+          <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
         </div>
         <div class="right"><span class="sub">${label}</span><span class="amt">${l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
       </article>`;

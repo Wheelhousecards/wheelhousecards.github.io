@@ -163,3 +163,12 @@ footer{padding-block:24px 40px;color:var(--muted);font-size:12px;text-align:cent
 /* Panels size to their own content instead of stretching to match the taller panel beside them */
 .panel{align-content:start}
 .staff-top{align-items:start}
+.linkbtn{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.linkbtn.code{font:500 12px var(--mono)}
+.modal{position:fixed;inset:0;z-index:40;background:rgba(8,12,16,.55);display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:calc(24px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}
+.modal-card{position:relative;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:12px;width:min(760px,100%);padding:24px 22px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.modal-x{position:absolute;top:10px;right:10px;background:var(--sunk);color:var(--ink);border:1px solid var(--line);border-radius:50%;width:36px;height:36px;font-size:20px;cursor:pointer}
+.modal-body{display:grid;gap:16px;min-width:0}
+.dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 18px;margin:0}
+.dl dt{font:600 11px var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding-top:3px}
+.dl dd{margin:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center;overflow-wrap:anywhere}

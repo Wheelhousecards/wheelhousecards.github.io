@@ -1,14 +1,15 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261030140943";
+import { db, logout } from "./firebase.js?v=20261030141808";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
-  fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor
-} from "./ui.js?v=20261030140943";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030140943";
+  fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
+  isLot, lotLine, cardDetailHtml, createModal
+} from "./ui.js?v=20261030141808";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030141808";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -233,10 +234,10 @@ function renderLedger() {
     const c = custById(l.cust), on = ui.sel.has(l.id);
     return `<tr data-id="${l.id}"${on ? ' class="on"' : ""}>
       <td><input type="checkbox" class="sel" aria-label="Select SKU ${esc(l.sku)}"${on ? " checked" : ""}></td>
-      <td class="code num">${esc(l.sku)}${l.batch && batchById(l.batch) ? `<div class="cert">${esc(l.batch)}</div>` : ""}</td>
+      <td class="code num"><button class="linkbtn code" type="button" data-open="${l.id}" aria-label="Details for SKU ${esc(l.sku)}">${esc(l.sku)}</button>${l.batch && batchById(l.batch) ? `<div class="cert">${esc(l.batch)}</div>` : ""}</td>
       <td>${c ? `<span class="code">${esc(c.code)}</span> ${esc(c.name)}` : `<select data-f="cust" aria-label="Assign a consignor to SKU ${esc(l.sku)}" style="border-color:var(--paid)"><option value="">Needs consignor…</option>${custSel}</select>`}</td>
       <td><span class="chip ${l.plat}">${l.plat === "fan" ? "Fanatics" : "PCS / eBay"}</span></td>
-      <td class="title">${esc(l.title)}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
+      <td class="title">${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
       <td>${l.format === "bin" ? "Buy It Now" : "Auction"}</td>
       <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}"></td>
@@ -373,6 +374,106 @@ $("#custList").addEventListener("click", e => {
     $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || ""; $("#c-notify").checked = c.notify !== false; syncPayHint();
     $("#c-save").textContent = `Save ${c.code}`; $("#c-cancel").hidden = false; $("#c-msg").textContent = ""; $("#c-name").focus();
   }
+});
+
+/* ---------- card details (click a SKU) ---------- */
+const detail = createModal();
+let openCard = "", stmt = null;
+const SFIELDS = [
+  { k: "item", label: "Item #", re: /item.?(#|id|no|num)|ebay.?(#|id|item)|listing.?(#|id)/i },
+  { k: "net", label: "After fees", re: /net|payout|proceeds|after.?fee|consignor/i },
+  { k: "date", label: "Date sold", re: /date|sold on|end/i },
+  { k: "price", label: "Sale price", re: /sale|sold|price|gross|amount|total/i },
+  { k: "title", label: "Card", re: /title|desc|card|name|item/i },
+];
+function openDetail(id) {
+  const l = S.listings.find(x => x.id === id); if (!l) return;
+  openCard = id; stmt = null;
+  const c = custById(l.cust), lot = isLot(l) || l.plat === "pcs";
+  const v = x => esc(x ?? "");
+  detail.open(cardDetailHtml(l, c, { staff: true }) + `
+    <form id="d-form" class="form" autocomplete="off" style="border-top:1px solid var(--line);padding-top:14px">
+      <div class="f w6"><h3>Edit</h3></div>
+      <div class="f w6"><label for="d-title">Card</label><input id="d-title" value="${v(l.title)}"></div>
+      <div class="f"><label for="d-grade">Grade</label><input id="d-grade" value="${v(l.grade === "Ungraded" ? "" : l.grade)}" placeholder="Ungraded"></div>
+      <div class="f"><label for="d-cert">Cert #</label><input id="d-cert" value="${v(l.cert)}" style="font-family:var(--mono)"></div>
+      <div class="f"><label for="d-period">${l.plat === "pcs" ? "Payout month" : "Auction / period"}</label><input id="d-period" value="${v(l.period)}" placeholder="${l.plat === "pcs" ? "October 2026" : "WA180"}"></div>
+      <div class="f"><label for="d-price">Price / sale</label><input id="d-price" type="number" step="0.01" min="0" value="${l.price ?? ""}"></div>
+      <div class="f"><label for="d-payout">Consignor portion</label><input id="d-payout" type="number" step="0.01" min="0" value="${l.payout ?? ""}" placeholder="Uses their split"></div>
+      <div class="f"><label for="d-count">Cards in lot</label><input id="d-count" type="number" step="1" min="0" value="${l.lotCount ?? ""}" placeholder="1"></div>
+      <div class="f w6"><label for="d-url">Listing link</label><input id="d-url" value="${v(l.url)}" placeholder="Paste the Fanatics Collect or eBay link"></div>
+      <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="d-msg" role="status"></span></div></div>
+    </form>
+    ${lot ? `<div style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:14px">
+      <h3>${l.items?.length ? "Replace the cards in this lot" : "Add the cards in this lot"}</h3>
+      <div class="muted" style="font-size:12px">Upload the PC Sportscards statement (CSV or Excel) for ${l.period ? esc(l.period) : "this payout"}. If the file covers more than this consignor, filter it down to their cards first.</div>
+      <label class="drop"><input type="file" id="d-file" accept=".csv,.tsv,.txt,.xlsx,.xls"><span id="d-file-t"><b>Choose the statement</b></span></label>
+      <div id="d-map" class="map" hidden></div>
+      <div id="d-prev" style="font-size:13px"></div>
+      <div class="row"><button class="btn" type="button" id="d-items-go" hidden>Save cards to this lot</button></div>
+    </div>` : ""}`);
+}
+function renderStmt() {
+  if (!stmt) return;
+  $("#d-map").hidden = false;
+  if (!$("#d-map").contains(document.activeElement)) $("#d-map").innerHTML = SFIELDS.map(f => `<div class="f"><label for="sm-${f.k}">${f.label}</label><select id="sm-${f.k}" data-k="${f.k}"><option value="-1">Not in file</option>${stmt.headers.map((h, i) => `<option value="${i}"${stmt.map[f.k] === i ? " selected" : ""}>${esc(h)}</option>`).join("")}</select></div>`).join("");
+  const m = stmt.map, g = (r, k) => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
+  const items = stmt.rows.map(r => {
+    const title = g(r, "title"); if (!title) return null;
+    const p = g(r, "price"), n = g(r, "net"), d = g(r, "date"), t = Date.parse(d);
+    return { title, price: p ? money2(p) : null, ...(n ? { net: money2(n) } : {}), item: g(r, "item").replace(/\.0+$/, ""), date: isNaN(t) ? "" : new Date(t).toISOString() };
+  }).filter(Boolean);
+  stmt.items = items;
+  const gross = items.reduce((s, x) => s + (x.price || 0), 0), net = items.reduce((s, x) => s + (x.net || 0), 0);
+  $("#d-prev").innerHTML = items.length ? `<b>${items.length} cards</b> · ${money(gross)} in sales${items.some(x => x.net != null) ? ` · ${money(net)} after fees` : ""}. First few: ${items.slice(0, 3).map(x => esc(x.title)).join("; ")}` : '<span class="act-skip">No cards found. Check which column holds the card name.</span>';
+  $("#d-items-go").hidden = !items.length;
+  $("#d-items-go").textContent = `Save ${items.length} cards to this lot`;
+}
+document.addEventListener("click", e => { const t = e.target.closest("[data-open]"); if (t) openDetail(t.dataset.open); });
+detail.body.addEventListener("submit", async e => {
+  if (e.target.id !== "d-form") return;
+  e.preventDefault();
+  const l = S.listings.find(x => x.id === openCard); if (!l) return;
+  const num = id => { const x = parseFloat($(id).value); return isNaN(x) ? null : Math.round(x * 100) / 100; };
+  const url = $("#d-url").value.trim(), d = url ? detect(url) : null;
+  if (url && !d) { $("#d-msg").textContent = "That link isn’t from Fanatics Collect or eBay."; return; }
+  const title = $("#d-title").value.trim(); if (!title) { $("#d-msg").textContent = "Enter the card name."; return; }
+  const cnt = parseInt($("#d-count").value, 10);
+  const patch = { title, grade: normGrade($("#d-grade").value), cert: $("#d-cert").value.trim(), period: $("#d-period").value.trim(), price: num("#d-price"), payout: num("#d-payout"), lotCount: isNaN(cnt) ? null : cnt, url, item: d ? d.item : (url ? l.item : "") };
+  if (d) patch.plat = d.plat;
+  if (url && l.status === "curating") patch.status = "live";
+  const ok = await guarded($("#d-msg"), async () => { await updateDoc(listingRef(l.id), { ...patch, updatedAt: serverTimestamp() }); return true; });
+  if (ok) { Object.assign(l, patch); openDetail(l.id); $("#d-msg").textContent = "Saved."; }
+});
+detail.body.addEventListener("change", e => {
+  if (e.target.id === "d-file") {
+    const file = e.target.files[0]; if (!file || !window.XLSX) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      try {
+        const isText = /\.(csv|tsv|txt)$/i.test(file.name);
+        const wb = XLSX.read(new Uint8Array(fr.result), { type: "array", raw: isText, cellDates: true });
+        const all = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: "" }).map(r => r.map(cellStr));
+        const hi = all.findIndex(r => r.filter(Boolean).length >= 2); if (hi < 0) throw new Error("empty");
+        const headers = all[hi].map((h, i) => h || `Column ${i + 1}`), map = {}, used = new Set();
+        SFIELDS.forEach(f => { const i = headers.findIndex((h, ix) => !used.has(ix) && f.re.test(h)); map[f.k] = i; if (i >= 0) used.add(i); });
+        stmt = { headers, rows: all.slice(hi + 1).filter(r => r.some(Boolean)), map };
+        $("#d-file-t").innerHTML = `<b>${esc(file.name)}</b> · choose a different file`;
+        renderStmt();
+      } catch (err) { $("#d-prev").textContent = `Couldn’t read ${file.name}. Save it as .csv or .xlsx and try again.`; }
+    };
+    fr.readAsArrayBuffer(file);
+  }
+  const k = e.target.dataset?.k;
+  if (k && stmt && e.target.id.startsWith("sm-")) { stmt.map[k] = parseInt(e.target.value, 10); e.target.blur(); renderStmt(); }
+});
+detail.body.addEventListener("click", async e => {
+  if (e.target.id !== "d-items-go" || !stmt?.items?.length) return;
+  const l = S.listings.find(x => x.id === openCard); if (!l) return;
+  const items = stmt.items.slice(0, 2000);
+  const patch = { items, lotCount: items.length };
+  const ok = await guarded($("#d-prev"), async () => { await updateDoc(listingRef(l.id), { ...patch, updatedAt: serverTimestamp() }); return true; });
+  if (ok) { Object.assign(l, patch); openDetail(l.id); }
 });
 
 /* ---------- payouts ---------- */
@@ -779,6 +880,7 @@ const HFIELDS = [
   { k: "salePrice", label: "Sale price", re: /^historic sale price$/i },
   { k: "portion", label: "Consignor portion", re: /^historic consignor portion$/i },
   { k: "tagPrice", label: "Tag price", re: /^tag price$/i },
+  { k: "auction", label: "Auction No. / payout month", re: /^auction/i },
 ];
 const FLISTS = { cust: CFIELDS, fan: FFIELDS, hist: HFIELDS };
 const fieldsFor = type => FLISTS[type] || FIELDS.filter(f => !f.only || f.only === type);
@@ -1004,6 +1106,12 @@ function planHistory() {
     else if (/active/.test(st)) status = "curating";
     else return { act: "skip", why: st ? `Status “${g("status")}”` : "No status", label, sku };
     const ex = bySku.get(sku);
+    const lotN = (g("size").match(/(\d+)\s*cards?/i) || [])[1];
+    const period = g("auction"), lotCount = lotN ? parseInt(lotN, 10) : null;
+    if (ex && ex.src === "consigncloud" && ((period && !ex.period) || (lotCount && !ex.lotCount))) {
+      const patch = {}; if (period && !ex.period) patch.period = period; if (lotCount && !ex.lotCount) patch.lotCount = lotCount;
+      return { act: "update", target: ex, patch, label: ex.title, sku, dup: true, status, added: isoDay(g("created")) };
+    }
     if (ex) return { act: "skip", why: ex.src === "consigncloud" ? "Already imported" : `SKU already used by “${ex.title}” in the new app`, label, sku, clash: ex.src !== "consigncloud", dup: ex.src === "consigncloud", status, added: isoDay(g("created")) };
     const c = byCode.get(g("account").toUpperCase());
     // Older rows keep the grade in Size and the card number in Color.
@@ -1025,6 +1133,7 @@ function planHistory() {
         format: plat === "fan" || plat === "pcs" ? "auction" : "bin",
         price: sold ? sale : tag > 1 ? tag : null, ...(sold ? { payout: portion } : {}),
         ends: "", status, soldDate: sold ? isoDay(g("soldDate")) : "", added: isoDay(g("created")) || now(), src: "consigncloud",
+        ...(period ? { period } : {}), ...(lotCount ? { lotCount } : {}),
       },
     };
   }).filter(Boolean);
@@ -1046,18 +1155,19 @@ function renderHistImport() {
   $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Grade</th><th>Consignor</th><th>Sale</th></tr>";
   if (!S.hist) { $("#i-sum").textContent = "Checking for cards already in the system…"; $("#i-prev").innerHTML = ""; $("#i-go").disabled = true; return; }
   const { plan, stats } = planHistory();
-  const fresh = plan.filter(p => p.act === "new"), n = st => fresh.filter(p => p.status === st).length;
+  const fresh = plan.filter(p => p.act === "new"), n = st => fresh.filter(p => p.status === st).length, ups = plan.filter(p => p.act === "update").length;
   const noCust = fresh.filter(p => !p.data.cust).length, clash = plan.filter(p => p.clash).length;
   $("#i-unpaid-note").textContent = stats.unpaid ? ` The file marks ${stats.unpaid.toLocaleString()} sold cards as not paid (${money(stats.unpaidAmt)} to consignors), mostly from past years. Leave this off to treat them as paid out, so customers only see what’s owed on their consignor record. ${stats.unpaidRecent} of them sold this year (${money(stats.unpaidRecentAmt)}).` : "";
   $("#i-sum").innerHTML = `<span class="act-new">${fresh.length.toLocaleString()} cards to bring in</span>: ${n("paid").toLocaleString()} paid out, ${n("sold")} sold awaiting payout, ${n("returned")} returned, ${n("curating")} still out (shown as Being curated until linked) · <span class="act-skip">${(plan.length - fresh.length).toLocaleString()} skipped</span> (${stats.retail.toLocaleString()} retail${plan.some(p => p.old) ? `, ${plan.filter(p => p.old).length.toLocaleString()} older than your limit` : ""})${noCust ? ` · <span class="need">${noCust} without a matching consignor</span>` : ""}${clash ? ` · <span class="need">${clash} SKUs already used by cards you added in the new app. Delete or renumber those cards first.</span>` : ""}`;
   const order = p => p.act === "new" ? (p.warn ? 0 : 1) : p.clash ? 0 : 2;
   $("#i-prev").innerHTML = [...plan].sort((a, b) => order(a) - order(b)).slice(0, 12).map(p => {
     const d = p.data;
-    const act = p.act === "new" ? `<span class="act-new">SKU ${esc(p.sku)} · ${STAT[p.status]}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
-    return `<tr><td>${act}</td><td class="title">${esc(p.label)}${d ? `<div class="cert">${PLAT[d.plat]}</div>` : ""}</td><td>${d ? gradeHtml(d, true) : ""}</td><td>${d ? (p.cust ? esc(p.cust.name) : '<span class="need">Not found</span>') : ""}${p.warn ? `<div class="cert" style="white-space:normal">${esc(p.warn)}</div>` : ""}</td><td class="num">${d && d.payout != null ? `${money(d.price)}<div class="cert">${money(d.payout)} to consignor</div>` : ""}</td></tr>`;
+    const act = p.act === "new" ? `<span class="act-new">SKU ${esc(p.sku)} · ${STAT[p.status]}</span>` : p.act === "update" ? `<span class="act-upd">Updates SKU ${esc(p.sku)}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
+    return `<tr><td>${act}</td><td class="title">${esc(p.label)}${d ? `<div class="cert">${PLAT[d.plat]}${d.period ? ` · ${esc(d.period)}` : ""}${d.lotCount ? ` · ${d.lotCount} cards` : ""}</div>` : ""}</td><td>${d ? gradeHtml(d, true) : ""}</td><td>${d ? (p.cust ? esc(p.cust.name) : '<span class="need">Not found</span>') : ""}${p.warn ? `<div class="cert" style="white-space:normal">${esc(p.warn)}</div>` : ""}</td><td class="num">${d && d.payout != null ? `${money(d.price)}<div class="cert">${money(d.payout)} to consignor</div>` : ""}</td></tr>`;
   }).join("") + (plan.length > 12 ? `<tr><td colspan="5" class="muted">…and ${(plan.length - 12).toLocaleString()} more rows</td></tr>` : "");
-  $("#i-go").disabled = !fresh.length;
-  $("#i-go").textContent = fresh.length ? `Bring in ${fresh.length.toLocaleString()} cards` : "Nothing to import";
+  if (ups) $("#i-sum").innerHTML += ` · <span class="act-upd">${ups.toLocaleString()} already-imported cards get their payout month or lot size</span>`;
+  $("#i-go").disabled = !fresh.length && !ups;
+  $("#i-go").textContent = fresh.length ? `Bring in ${fresh.length.toLocaleString()} cards` : ups ? `Update ${ups.toLocaleString()} cards` : "Nothing to import";
 }
 function renderCustImport() {
   $("#i-batchwrap").hidden = true;
@@ -1118,13 +1228,14 @@ $("#i-limit").addEventListener("change", e => { e.target.blur(); renderImport();
 $("#i-go").addEventListener("click", async () => {
   if (itype() === "hist") {
     await loadHistory();
-    const { plan, stats } = planHistory(), fresh = plan.filter(p => p.act === "new");
+    const { plan, stats } = planHistory(), fresh = plan.filter(p => p.act === "new"), ups = plan.filter(p => p.act === "update");
     $("#i-go").disabled = true; importing = true;
     const ok = await guarded($("#i-msg"), async () => {
       for (let i = 0; i < fresh.length; i += 400) {
         $("#i-msg").textContent = `Bringing in cards… ${Math.min(i + 400, fresh.length).toLocaleString()} of ${fresh.length.toLocaleString()}`;
         await commit(fresh.slice(i, i + 400).map(p => ["set", doc(db, "listings", "cc-" + p.sku), { ...p.data, addedBy: me, updatedAt: serverTimestamp() }]));
       }
+      for (let i = 0; i < ups.length; i += 400) await commit(ups.slice(i, i + 400).map(p => upd(p.target.id, p.patch)));
       await bump("sku", Math.max(stats.maxSku, maxSku()));
       return true;
     });
@@ -1132,7 +1243,7 @@ $("#i-go").addEventListener("click", async () => {
     if (!ok) { $("#i-go").disabled = false; return; }
     closeImport();
     const noCust = fresh.filter(p => !p.data.cust).length;
-    $("#i-msg").textContent = `Brought in ${fresh.length.toLocaleString()} cards. New cards will be numbered from SKU ${pad6(Math.max(stats.maxSku, maxSku()) + 1)}.` + (noCust ? ` ${noCust} have no matching consignor. Add that consignor, then assign them from the card list (filter: Needs consignor).` : "");
+    $("#i-msg").textContent = `Brought in ${fresh.length.toLocaleString()} cards${ups.length ? ` and updated ${ups.length.toLocaleString()}` : ""}. New cards will be numbered from SKU ${pad6(Math.max(stats.maxSku, maxSku()) + 1)}.` + (noCust ? ` ${noCust} have no matching consignor. Add that consignor, then assign them from the card list (filter: Needs consignor).` : "");
     return;
   }
   if (itype() === "cust") {
