@@ -319,12 +319,12 @@ const SITE = "https://wheelhousecards.github.io";
 let paidArm = "";
 function payoutEmail(c, o) {
   const first = (c.name || "").split(/\s+/)[0] || "there";
-  const lines = o.cards.slice(0, 15).map(l => `- SKU ${l.sku} · ${l.title}: sold for ${money(l.price)}, you receive ${money((l.price || 0) * (c.rate ?? 85) / 100)}`);
+  const lines = o.cards.slice(0, 15).map(l => `- SKU ${l.sku} · ${l.title}: sold for ${money(l.price)}`); // not used right now
   if (o.cards.length > 15) lines.push(`- …and ${o.cards.length - 15} more on your page`);
   const body = [
     `Hi ${first},`, "",
     `You have a Wheelhouse consignment payout of ${money(o.amount)} coming your way.`, "",
-    ...(o.cards.length ? [`Cards sold (at your ${c.rate ?? 85}% rate):`, ...lines, ""] : []),
+    // Card-by-card list left out for now; add `...(o.cards.length ? [...lines, ""] : [])` here to bring it back.
     ...(c.payable ? [`Includes ${money(c.payable)} carried over from your previous balance.`, ""] : []),
     payLine(c) ? `We’ll send it by ${payLine(c)}. If that’s changed, just reply and let us know.` : "How would you like to be paid: Venmo, PayPal or check? Reply with your handle, PayPal email or mailing address.",
     "", `You can see all your cards and sales anytime at ${SITE}`, "", "Thanks,", "Wheelhouse",
