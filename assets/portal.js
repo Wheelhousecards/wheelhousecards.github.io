@@ -1,9 +1,9 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261030164740";
+import { db, logout } from "./firebase.js?v=20261030165757";
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261030164740";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030164740";
-import { contact } from "./firebase-config.js?v=20261030164740";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261030165757";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030165757";
+import { contact } from "./firebase-config.js?v=20261030165757";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });

@@ -4,7 +4,7 @@ export const $ = (s, r = document) => r.querySelector(s);
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const money = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
 export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards", goldin: "Goldin", shibe: "Shibe Sports", other: "Other" };
-export const STAT = { curating: "Being curated", live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you" };
+export const STAT = { curating: "Being curated", live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you", removed: "Removed" };
 export const pad6 = n => String(n).padStart(6, "0");
 export const plural = n => `${n} card${n === 1 ? "" : "s"}`;
 export const isSold = l => l.status === "sold" || l.status === "paid";
@@ -250,7 +250,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto } = {}) {
     const pl = payLine(c);
     q("contact").innerHTML = `<span class="code">${esc(c.code)}</span> · ${esc(c.email || "No email on file")} · ${esc(c.phone || "No phone on file")}<br>${pl ? `Payouts go by ${esc(pl)}` : "Payout method not set yet. Tell us how you’d like to be paid."}`;
     const rate = (c.rate ?? 85) / 100;
-    const mine = listings;
+    const mine = listings.filter(l => l.status !== "removed");
     const live = mine.filter(l => l.status === "live"), liveVal = live.reduce((s, l) => s + (l.price || 0), 0);
     const thirty = Date.now() - 30 * 864e5, sold30 = mine.filter(l => isSold(l) && new Date(l.soldDate || 0) > thirty);
     const owed = mine.filter(l => l.status === "sold").reduce((s, l) => s + cardPayout(l, c), 0) + (c.payable || 0);

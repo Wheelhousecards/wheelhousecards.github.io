@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261030164740";
+import { db, logout } from "./firebase.js?v=20261030165757";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -8,21 +8,25 @@ import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout
-} from "./ui.js?v=20261030164740";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030164740";
+} from "./ui.js?v=20261030165757";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030165757";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
 // cards (thousands from the old system) load only when needed, so the app stays inside Firestore's free daily reads.
-const ACTIVE = ["curating", "live", "sold", "unsold"], PAST = ["paid", "returned"];
-const S = { customers: [], active: [], hist: null, batches: [], staff: [], notes: {}, counters: {}, _all: null };
-Object.defineProperty(S, "listings", { get() {
+// "removed" is a recycle bin: removed cards can be restored until they're deleted for good.
+const ACTIVE = ["curating", "live", "sold", "unsold"], PAST = ["paid", "returned", "removed"];
+const S = { imports: [], customers: [], active: [], hist: null, batches: [], staff: [], notes: {}, counters: {}, _all: null };
+// S.all includes removed cards (for the Removed tab, restores and SKU checks); S.listings leaves them out.
+Object.defineProperty(S, "all", { get() {
   if (!S._all) {
     if (!S.hist) S._all = S.active;
     else { const m = new Map(S.hist.map(l => [l.id, l])); S.active.forEach(l => m.set(l.id, l)); S._all = [...m.values()]; }
+    S._live = S._all.filter(l => l.status !== "removed");
   }
   return S._all;
 } });
+Object.defineProperty(S, "listings", { get() { S.all; return S._live; } });
 let histUnsub = null, histReady = null;
 function loadHistory() {
   if (histReady) return histReady;
@@ -40,7 +44,7 @@ let me = "", unsubs = [], ready = new Set();
 const custById = id => S.customers.find(c => c.id === id);
 const batchById = id => S.batches.find(b => b.id === id);
 const emailOf = id => custById(id)?.email || "";
-const maxSku = () => S.listings.reduce((m, l) => Math.max(m, parseInt(l.sku, 10) || 0), 0);
+const maxSku = () => S.all.reduce((m, l) => Math.max(m, parseInt(l.sku, 10) || 0), 0);
 const maxBatchNo = () => S.batches.reduce((m, b) => Math.max(m, parseInt(String(b.id).replace(/\D/g, ""), 10) || 0), 0);
 const nextSku = () => pad6(Math.max(S.counters.sku || 0, maxSku()) + 1);
 const now = () => new Date().toISOString();
@@ -125,7 +129,11 @@ function listen() {
   sub("batches", "batches", d => ({ id: d.id, ...d.data() }));
   sub("staff", "staff", d => ({ id: d.id, ...d.data() }));
   unsubs.push(onSnapshot(col("batchNotes"), s => { S.notes = Object.fromEntries(s.docs.map(d => [d.id, d.data().notes || ""])); done("notes"); render(); }, fail));
-  unsubs.push(onSnapshot(doc(db, "meta", "counters"), s => { S.counters = s.exists() ? s.data() : {}; render(); }, () => {}));
+  unsubs.push(onSnapshot(col("meta"), s => {
+    const c = s.docs.find(d => d.id === "counters"); S.counters = c ? c.data() : {};
+    S.imports = s.docs.filter(d => d.id.startsWith("imp-")).map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.id.localeCompare(a.id));
+    render();
+  }, () => {}));
 }
 
 /* ---------- shell ---------- */
@@ -205,6 +213,7 @@ function renderStaff() {
   renderBatches();
   renderLedger();
   if (imp && !importing) renderImport();
+  renderImports();
 }
 
 function renderCustList() {
@@ -228,10 +237,12 @@ function renderLedger() {
   const fb = $("#f-batch").value;
   $("#f-batch").innerHTML = batchOptions(fb, `<option value="">All batches</option><option value="__nob"${fb === "__nob" ? " selected" : ""}>Not in a batch</option>`);
   const q = $("#f-q").value.trim().toLowerCase(), fp = $("#f-plat").value, fs = $("#f-st").value;
-  const view = ui.view, past = view === "paid" || view === "returned" || view === "all";
+  const view = ui.view, past = view !== "play";
+  const fav = $("#f-added").value, fa = fav === "today" ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString() : fav === "7d" ? new Date(Date.now() - 7 * 864e5).toISOString() : fav === "1h" ? new Date(Date.now() - 36e5).toISOString() : "";
   const loading = past && !S.hist;
-  const rows = (loading ? [] : S.listings).filter(l =>
-    (view === "all" || (view === "play" ? !PAST.includes(l.status) : l.status === view)) &&
+  const rows = (loading ? [] : S.all).filter(l =>
+    (view === "all" ? l.status !== "removed" : view === "play" ? !PAST.includes(l.status) : l.status === view) &&
+    (!fa || (l.added || "") >= fa) &&
     (!fc || (fc === "__none" ? !custById(l.cust) : l.cust === fc)) &&
     (!fp || l.plat === fp) && (!fs || l.status === fs) &&
     (!fb || (fb === "__nob" ? !batchById(l.batch) : l.batch === fb)) &&
@@ -239,7 +250,8 @@ function renderLedger() {
   ).sort(view === "paid" || view === "returned"
     ? (a, b) => (b.soldDate || b.added || "").localeCompare(a.soldDate || a.added || "") || (b.sku || "").localeCompare(a.sku || "")
     : (a, b) => (a.status === "live" ? 0 : 1) - (b.status === "live" ? 0 : 1) || (b.sku || "").localeCompare(a.sku || ""));
-  const viewName = { play: "in play", paid: "paid out", returned: "returned", all: "in total" }[view];
+  const viewName = { play: "in play", paid: "paid out", returned: "returned", all: "in total", removed: "removed" }[view];
+  $("#bb-del").hidden = view === "removed"; $("#bb-restore").hidden = view !== "removed"; $("#bb-purge").hidden = view !== "removed";
   $("#count").textContent = loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
   $("#th-price").textContent = view === "paid" ? "Sale / to consignor" : "Price / bid";
   $("#th-when").textContent = view === "paid" ? "Sold" : view === "returned" ? "Added" : "Ends";
@@ -266,7 +278,7 @@ function renderLedger() {
   renderBulk();
 }
 $("#tbody").addEventListener("focusout", () => setTimeout(() => { if ($("#tbody").dataset.stale && !$("#tbody").contains(document.activeElement)) renderLedger(); }, 0));
-["#f-q", "#f-cust", "#f-plat", "#f-st", "#f-batch"].forEach(s => $(s).addEventListener("input", renderLedger));
+["#f-q", "#f-cust", "#f-plat", "#f-st", "#f-batch", "#f-added"].forEach(s => $(s).addEventListener("input", renderLedger));
 function setView(v) {
   ui.view = v; ui.sel.clear();
   [...$("#views").children].forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v));
@@ -409,7 +421,7 @@ const SFIELDS = [
   { k: "title", label: "Card", re: /title|desc|card|name|item/i },
 ];
 function openDetail(id) {
-  const l = S.listings.find(x => x.id === id); if (!l) return;
+  const l = S.all.find(x => x.id === id); if (!l) return;
   openCard = id; stmt = null;
   const c = custById(l.cust), lot = isLot(l) || l.plat === "pcs";
   const v = x => esc(x ?? "");
@@ -611,7 +623,7 @@ $("#p-body").addEventListener("click", async e => {
 let delOne = "";
 const lmsg = t => { $("#ledger-msg").textContent = t; };
 $("#tbody").addEventListener("change", async e => {
-  const tr = e.target.closest("tr"), l = S.listings.find(x => x.id === tr?.dataset.id); if (!l) return;
+  const tr = e.target.closest("tr"), l = S.all.find(x => x.id === tr?.dataset.id); if (!l) return;
   if (e.target.classList.contains("sel")) { e.target.checked ? ui.sel.add(l.id) : ui.sel.delete(l.id); tr.classList.toggle("on", e.target.checked); delArm = false; renderBulk(); return; }
   const f = e.target.dataset.f;
   await guarded($("#ledger-msg"), async () => {
@@ -636,19 +648,20 @@ $("#tbody").addEventListener("click", async e => {
   const id = e.target.closest("tr").dataset.id, l = S.listings.find(x => x.id === id);
   if (delOne !== id) { delOne = id; e.target.textContent = "Sure?"; return; }
   delOne = "";
-  await guarded($("#ledger-msg"), async () => { await deleteDoc(listingRef(id)); lmsg(`Removed SKU ${l.sku}.`); });
+  await guarded($("#ledger-msg"), async () => { await commit([softRemove(l)]); lmsg(`Removed SKU ${l.sku}. It’s in the Removed tab if you need it back.`); });
 });
 
 /* ---------- bulk edit ---------- */
 let delArm = false;
 function renderBulk() {
-  for (const id of ui.sel) if (!S.listings.some(l => l.id === id)) ui.sel.delete(id);
+  for (const id of ui.sel) if (!S.all.some(l => l.id === id)) ui.sel.delete(id);
   const n = ui.sel.size; $("#bulkbar").hidden = !n;
   if (n) {
     $("#bb-n").textContent = `${n} selected`;
     $("#bb-cust").innerHTML = S.customers.length ? custOptions($("#bb-cust").value) : '<option value="">Add a consignor first</option>';
     $("#bb-batch").innerHTML = S.batches.length ? batchOptions($("#bb-batch").value, "") + '<option value="__out">Take out of batch</option>' : '<option value="">No batches yet</option>';
     if (!delArm) $("#bb-del").textContent = "Remove";
+    if (!purgeArm) $("#bb-purge").textContent = "Delete for good";
   }
   const need = S.listings.filter(l => !custById(l.cust)).length;
   $("#needs").hidden = !need;
@@ -656,7 +669,7 @@ function renderBulk() {
   const vis = ui.visible, k = vis.filter(id => ui.sel.has(id)).length, all = $("#selAll");
   all.checked = vis.length > 0 && k === vis.length; all.indeterminate = k > 0 && k < vis.length;
 }
-const selected = () => S.listings.filter(l => ui.sel.has(l.id));
+const selected = () => S.all.filter(l => ui.sel.has(l.id));
 async function bulk(btn, fn) {
   btn.disabled = true;
   await guarded($("#ledger-msg"), fn);
@@ -696,8 +709,26 @@ $("#bb-del").addEventListener("click", e => {
   if (!delArm) { delArm = true; e.target.textContent = `Click again to remove ${plural(n)}`; return; }
   bulk(e.target, async () => {
     const ls = selected();
+    await commit(ls.map(softRemove));
+    ui.sel.clear(); lmsg(`Removed ${plural(ls.length)}. They’re in the Removed tab, where you can restore them.`);
+  });
+});
+const softRemove = l => upd(l.id, { status: "removed", prevStatus: l.status === "removed" ? (l.prevStatus || "live") : l.status, removedAt: now(), removedBy: me });
+const restoreOp = l => upd(l.id, { status: l.prevStatus || "live", prevStatus: null, removedAt: null });
+$("#bb-restore").addEventListener("click", e => bulk(e.target, async () => {
+  const ls = selected().filter(l => l.status === "removed");
+  await commit(ls.map(restoreOp));
+  ui.sel.clear(); lmsg(`Restored ${plural(ls.length)}.`);
+}));
+let purgeArm = false;
+$("#bb-purge").addEventListener("click", e => {
+  const ls = selected().filter(l => l.status === "removed");
+  if (!purgeArm) { purgeArm = true; e.target.textContent = `Click again to delete ${plural(ls.length)} for good`; return; }
+  purgeArm = false;
+  bulk(e.target, async () => {
     await commit(ls.map(l => ["delete", listingRef(l.id)]));
-    ui.sel.clear(); lmsg(`Removed ${plural(ls.length)}.`);
+    for (const id of new Set(ls.map(l => l.photo?.id).filter(Boolean))) await dropPhotoIfUnused(id, ls.map(l => l.id));
+    ui.sel.clear(); lmsg(`Deleted ${plural(ls.length)} for good.`);
   });
 });
 $("#bb-clear").addEventListener("click", () => { ui.sel.clear(); delArm = false; renderLedger(); });
@@ -1003,7 +1034,7 @@ function readFile(file) {
 }
 function planImport() {
   const type = itype(), m = imp.map;
-  const used = new Set(S.listings.map(l => l.sku));
+  const used = new Set(S.all.map(l => l.sku));
   let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
   const byItem = new Map(S.listings.filter(l => l.item).map(l => [l.item, l]));
   const seen = new Set(), pick = batchById($("#i-batch").value);
@@ -1103,7 +1134,7 @@ function planFan() {
   S.listings.filter(l => digits(l.cert)).sort((a, b) => (a.plat === "fan" ? 1 : 0) - (b.plat === "fan" ? 1 : 0)).forEach(l => byCert.set(digits(l.cert), l));
   const byTitle = new Map();
   S.listings.filter(l => l.plat === "fan" && !l.url).forEach(l => { const k = norm(l.title); byTitle.set(k, byTitle.has(k) ? null : l); });
-  const used = new Set(), usedSku = new Set(S.listings.map(l => l.sku));
+  const used = new Set(), usedSku = new Set(S.all.map(l => l.sku));
   let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
   return imp.rows.map(r => {
     const g = k => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
@@ -1149,9 +1180,9 @@ function planPcs() {
   const g = (r, k) => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
   const rows = imp.rows.map(r => ({ r, listed: isoDay(g(r, "listed")) })).sort((a, b) => b.listed.localeCompare(a.listed));
   const scan = recent ? rows.slice(0, recent) : rows;
-  const byPcs = new Map(S.listings.filter(l => l.pcsId).map(l => [l.pcsId, l]));
-  const byItem = new Map(S.listings.filter(l => l.item).map(l => [l.item, l]));
-  const used = new Set(S.listings.map(l => l.sku)), seen = new Set();
+  const byPcs = new Map(S.all.filter(l => l.pcsId).map(l => [l.pcsId, l]));
+  const byItem = new Map(S.all.filter(l => l.item).map(l => [l.item, l]));
+  const used = new Set(S.all.map(l => l.sku)), seen = new Set();
   let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
   const plan = scan.map(({ r, listed }) => {
     const pcsId = g(r, "pcsId").replace(/\.0+$/, ""), title = g(r, "title");
@@ -1169,6 +1200,7 @@ function planPcs() {
     const price = money2(g(r, "price")), net = money2(g(r, "net"));
     const status = kind === "received" ? "sold" : kind;
     const ex = pcsId ? byPcs.get(pcsId) : byItem.get(item);
+    if (ex && ex.status === "removed") return { act: "skip", why: `Removed earlier (SKU ${ex.sku}). Restore it from the Removed tab to bring it back.`, label, same: true };
     if (ex) {
       // Never move a card backwards: paid-out stays paid out, and a sale isn't undone by an older row.
       const rank = { curating: 0, live: 1, unsold: 1, sold: 2, paid: 3, returned: 3 };
@@ -1249,7 +1281,7 @@ function platFromShelf(v) {
 function planHistory() {
   const m = imp.map, countUnpaid = $("#i-unpaid").checked;
   const byCode = new Map(S.customers.map(c => [String(c.code || "").toUpperCase(), c]));
-  const bySku = new Map(S.listings.map(l => [l.sku, l]));
+  const bySku = new Map(S.all.map(l => [l.sku, l]));
   const seen = new Set(), stats = { unpaid: 0, unpaidAmt: 0, unpaidRecent: 0, unpaidRecentAmt: 0, retail: 0, maxSku: 0 };
   const yr = String(new Date().getFullYear());
   const plan = imp.rows.map(r => {
@@ -1395,6 +1427,36 @@ $("#i-fields").addEventListener("change", e => { const k = e.target.dataset.k; i
 $("#i-batch").addEventListener("change", e => { e.target.blur(); renderImport(); });
 $("#i-cancel").addEventListener("click", () => { closeImport(); $("#i-msg").textContent = ""; });
 $("#i-unpaid").addEventListener("change", () => renderImport());
+/* import history and undo */
+const KIND = { full: "Wheelhouse sheet", pcs: "PC Sportscards export", fan: "Fanatics export", hist: "Consignment history" };
+async function logImport(entry) {
+  if (!entry.created.length && !entry.updated.length) return;
+  try { await setDoc(doc(db, "meta", "imp-" + Date.now()), { ...entry, at: now(), by: me, undone: false }); } catch (e) { console.error(e); }
+}
+let undoArm = "";
+function renderImports() {
+  const list = (S.imports || []).slice(0, 6);
+  $("#imp-log").hidden = !list.length;
+  $("#imp-rows").innerHTML = list.map(x => `<div class="staff-row"><span><b>${esc(KIND[x.kind] || "Import")}</b> · ${esc(x.file || "")} · ${new Date(x.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}<span class="muted"> · ${x.created.length} added${x.updated.length ? `, ${x.updated.length} updated` : ""}</span></span>${x.undone ? `<span class="muted" style="font-size:12px">Undone. Added cards are in the Removed tab.</span>` : `<button class="btn ghost sm" type="button" data-undo="${x.id}">${undoArm === x.id ? `Click again to undo` : "Undo"}</button>`}</div>`).join("");
+}
+$("#imp-rows").addEventListener("click", async e => {
+  const id = e.target.dataset.undo; if (!id) return;
+  if (undoArm !== id) { undoArm = id; renderImports(); return; }
+  undoArm = "";
+  const x = S.imports.find(i => i.id === id); if (!x) return;
+  e.target.disabled = true; e.target.textContent = "Undoing…";
+  const ok = await guarded($("#i-msg"), async () => {
+    const ops = [
+      ...x.created.map(c => upd(c.id, { status: "removed", prevStatus: c.status || "live", removedAt: now(), removedBy: me })),
+      ...x.updated.map(u => upd(u.id, u.before)),
+    ];
+    for (let i = 0; i < ops.length; i += 400) await commit(ops.slice(i, i + 400));
+    await updateDoc(doc(db, "meta", id), { undone: true, undoneAt: now(), undoneBy: me });
+    return true;
+  });
+  if (ok) $("#i-msg").textContent = `Undid that import: ${plural(x.created.length)} moved to the Removed tab${x.updated.length ? ` and ${x.updated.length} changes put back` : ""}. To reverse this, open the Removed tab and restore them.`;
+  else renderImports();
+});
 $("#i-limit").addEventListener("change", e => { e.target.blur(); renderImport(); });
 $("#i-recent").addEventListener("change", e => { e.target.blur(); renderImport(); });
 $("#i-cutoff").addEventListener("change", () => renderImport());
@@ -1409,6 +1471,7 @@ $("#i-go").addEventListener("click", async () => {
         await commit(fresh.slice(i, i + 400).map(p => ["set", doc(db, "listings", "cc-" + p.sku), { ...p.data, addedBy: me, updatedAt: serverTimestamp() }]));
       }
       for (let i = 0; i < ups.length; i += 400) await commit(ups.slice(i, i + 400).map(p => upd(p.target.id, p.patch)));
+      await logImport({ kind: "hist", file: imp.file, created: fresh.map(p => ({ id: "cc-" + p.sku, status: p.data.status })), updated: ups.map(p => ({ id: p.target.id, before: Object.fromEntries(Object.keys(p.patch).map(k => [k, p.target[k] ?? null])) })) });
       await bump("sku", Math.max(stats.maxSku, maxSku()));
       return true;
     });
@@ -1440,24 +1503,28 @@ $("#i-go").addEventListener("click", async () => {
     const autos = fresh.filter(p => p.auto), explicit = fresh.filter(p => !p.auto).map(p => parseInt(p.data.sku, 10));
     const floor = Math.max(maxSku(), ...explicit, 0);
     if (autos.length) {
-      const taken = new Set([...S.listings.map(l => l.sku), ...fresh.filter(p => !p.auto).map(p => p.data.sku)]);
+      const taken = new Set([...S.all.map(l => l.sku), ...fresh.filter(p => !p.auto).map(p => p.data.sku)]);
       let n = await reserve("sku", autos.length, floor);
       autos.forEach(p => { while (taken.has(pad6(n))) n++; p.data.sku = pad6(n++); taken.add(p.data.sku); });
       await bump("sku", n - 1);
     } else if (explicit.length) await bump("sku", Math.max(...explicit));
     const ops = [];
     fresh.forEach(p => ops.push(["set", doc(col("listings")), { ...p.data, custEmail: emailOf(p.data.cust), added: now(), addedBy: me, updatedAt: serverTimestamp() }]));
+    const before = [];
+    const keep = (t, data) => before.push({ id: t.id, before: Object.fromEntries(Object.keys(data).map(k => [k, t[k] ?? null])) });
     ups.forEach(p => {
-      if (p.patch) { ops.push(upd(p.target.id, p.patch)); return; }
+      if (p.patch) { keep(p.target, p.patch); ops.push(upd(p.target.id, p.patch)); return; }
       const t = p.target, data = {};
       if (p.price != null) data.price = p.price;
       if (p.ends) data.ends = p.ends;
       if (p.status) { data.status = p.status; if ((p.status === "sold" || p.status === "paid") && !t.soldDate) data.soldDate = now(); }
       if (p.cust) { data.cust = p.cust; data.custEmail = emailOf(p.cust); }
       if (p.batch) data.batch = p.batch;
+      keep(t, data);
       ops.push(upd(t.id, data));
     });
     await commit(ops);
+    await logImport({ kind: itype(), file: imp.file, created: fresh.map((p, i) => ({ id: ops[i][1].id, status: p.data.status })), updated: before });
     return { refs: ops.slice(0, fresh.length).map(o => o[1].id), unassigned: fresh.map((p, i) => !p.data.cust ? ops[i][1].id : null).filter(Boolean) };
   });
   if (!res) { $("#i-go").disabled = false; return; }
