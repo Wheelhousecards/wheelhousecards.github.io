@@ -160,3 +160,6 @@ footer{padding-block:24px 40px;color:var(--muted);font-size:12px;text-align:cent
 .st.curating{background:var(--paid)}
 .chip.goldin,.chip.shibe,.chip.other{color:var(--muted)}
 .st.returned{background:var(--unsold)}
+/* Panels size to their own content instead of stretching to match the taller panel beside them */
+.panel{align-content:start}
+.staff-top{align-items:start}
