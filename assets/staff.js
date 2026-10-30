@@ -99,14 +99,35 @@ function listen() {
 
 /* ---------- shell ---------- */
 const dash = mountDashboard($("#cust"), `<div class="sel" style="display:grid;gap:4px;width:min(280px,100%)"><label for="cv-pick">Preview as consignor</label><select id="cv-pick"></select></div>`);
-$("#cv-pick").addEventListener("change", e => { ui.cv = e.target.value; render(); });
-function setMode(m) {
+$("#cv-pick").addEventListener("change", e => { ui.cv = e.target.value; try { history.replaceState({ v: "cust", cv: ui.cv }, "", "#customer"); } catch (err) {} render(); });
+// Opening a customer page adds a browser history entry, so the browser's back button
+// (and the "Back to staff" button) returns to the staff app where you left off.
+let staffScroll = 0;
+function setMode(m, fromHistory) {
+  const was = ui.mode;
+  if (m === "cust" && was !== "cust" && !$("#staff").hidden) staffScroll = window.scrollY;
   ui.mode = m;
   $("#m-staff").setAttribute("aria-pressed", m === "staff"); $("#m-cust").setAttribute("aria-pressed", m === "cust");
+  $("#back").hidden = m !== "cust";
   show(m); render();
+  if (!fromHistory && m === "cust" && was !== "cust") { try { history.pushState({ v: "cust", cv: ui.cv }, "", "#customer"); } catch (err) {} }
+  if (m === "cust" && was !== "cust") window.scrollTo(0, 0);
+  if (m === "staff" && was === "cust") requestAnimationFrame(() => window.scrollTo(0, staffScroll));
 }
-$("#m-staff").addEventListener("click", () => setMode("staff"));
-$("#m-cust").addEventListener("click", () => setMode("cust"));
+function backToStaff() {
+  if (history.state && history.state.v === "cust") history.back();
+  else setMode("staff");
+}
+window.addEventListener("popstate", e => {
+  if (!ready.has("customers")) return;
+  const st = e.state;
+  if (st && st.v === "cust") { if (st.cv) ui.cv = st.cv; setMode("cust", true); }
+  else if (ui.mode === "cust") setMode("staff", true);
+});
+if (location.hash === "#customer") { try { history.replaceState(null, "", location.pathname); } catch (err) {} }
+$("#m-staff").addEventListener("click", () => { if (ui.mode === "cust") backToStaff(); });
+$("#m-cust").addEventListener("click", () => { if (ui.mode !== "cust") setMode("cust"); });
+$("#back").addEventListener("click", backToStaff);
 function render() {
   if (!["customers", "listings", "batches"].every(k => ready.has(k))) return;
   if (ui.mode === "staff") renderStaff(); else renderCust();
