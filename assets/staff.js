@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261030133016";
+import { db, logout } from "./firebase.js?v=20261030135450";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -7,8 +7,8 @@ import {
 import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor
-} from "./ui.js?v=20261030133016";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030133016";
+} from "./ui.js?v=20261030135450";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030135450";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1004,7 +1004,7 @@ function planHistory() {
     else if (/active/.test(st)) status = "curating";
     else return { act: "skip", why: st ? `Status “${g("status")}”` : "No status", label, sku };
     const ex = bySku.get(sku);
-    if (ex) return { act: "skip", why: ex.src === "consigncloud" ? "Already imported" : `SKU already used by “${ex.title}” in the new app`, label, sku, clash: ex.src !== "consigncloud" };
+    if (ex) return { act: "skip", why: ex.src === "consigncloud" ? "Already imported" : `SKU already used by “${ex.title}” in the new app`, label, sku, clash: ex.src !== "consigncloud", dup: ex.src === "consigncloud", status, added: isoDay(g("created")) };
     const c = byCode.get(g("account").toUpperCase());
     // Older rows keep the grade in Size and the card number in Color.
     const graw = g("grade") || (gradeish(g("size")) ? g("size") : "");
@@ -1030,11 +1030,13 @@ function planHistory() {
   }).filter(Boolean);
   // Optional limit: keep the newest cards by date added; cards still in play always come in.
   const limit = parseInt($("#i-limit").value, 10) || 0;
-  const fresh = plan.filter(p => p.act === "new");
-  if (limit && fresh.length > limit) {
-    const keep = new Set(fresh.filter(p => !PAST.includes(p.status)));
-    fresh.filter(p => PAST.includes(p.status)).sort((a, b) => b.data.added.localeCompare(a.data.added)).slice(0, Math.max(0, limit - keep.size)).forEach(p => keep.add(p));
-    fresh.forEach(p => { if (!keep.has(p)) { p.act = "skip"; p.why = "Older than the most recent " + limit.toLocaleString(); p.old = true; } });
+  // Ranked across the whole file (including cards already brought in), so re-uploading never pulls in older cards.
+  if (limit) {
+    const cands = plan.filter(p => p.act === "new" || p.dup);
+    const addedOf = p => (p.data ? p.data.added : p.added) || "";
+    const keep = new Set(cands.filter(p => !PAST.includes(p.status)));
+    cands.filter(p => PAST.includes(p.status)).sort((a, b) => addedOf(b).localeCompare(addedOf(a))).slice(0, Math.max(0, limit - keep.size)).forEach(p => keep.add(p));
+    plan.forEach(p => { if (p.act === "new" && !keep.has(p)) { p.act = "skip"; p.why = "Older than the most recent " + limit.toLocaleString(); p.old = true; } });
   }
   return { plan, stats };
 }
