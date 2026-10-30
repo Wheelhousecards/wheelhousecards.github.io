@@ -32,8 +32,9 @@ async function start(user) {
     const cs = await getDocs(query(collection(db, "customers"), where("email", "==", me)));
     if (cs.empty) {
       $("#none-msg").textContent = `We couldn’t find a consignment account for ${me}. If you’ve consigned cards with Wheelhouse, ask us to add this email to your account.`;
-      const bits = [contact.email && `Email ${contact.email}`, contact.phone && `call ${contact.phone}`].filter(Boolean);
-      $("#none-contact").innerHTML = bits.length ? esc(bits.join(" or ")) + "." : `Stop by any Wheelhouse location or reach us through <a href="${esc(contact.site)}" target="_blank" rel="noopener">wheelhousecards.com</a>.`;
+      $("#none-contact").innerHTML = contact.email
+        ? `Email us at <a href="mailto:${esc(contact.email)}">${esc(contact.email)}</a> with your name and the email you signed up with, and we’ll connect it to your cards.` + (contact.phone ? ` You can also call ${esc(contact.phone)}.` : "")
+        : `Stop by any Wheelhouse location or reach us through <a href="${esc(contact.site)}" target="_blank" rel="noopener">wheelhousecards.com</a>.`;
       show("none"); return;
     }
     state.customer = { id: cs.docs[0].id, ...cs.docs[0].data() };

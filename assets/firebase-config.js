@@ -11,7 +11,7 @@ export const firebaseConfig = {
 
 // Shown to customers who sign in but don't have an account yet.
 export const contact = {
-  email: "",
+  email: "info@wheelhousecards.com",
   phone: "",
   site: "https://wheelhousecards.com"
 };
