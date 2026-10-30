@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js";
+import { db, logout } from "./firebase.js?v=20261030122919";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -7,8 +7,8 @@ import {
 import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor
-} from "./ui.js";
-import { setupGate, gateMarkup } from "./gate.js";
+} from "./ui.js?v=20261030122919";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030122919";
 
 /* ---------- state ---------- */
 const S = { customers: [], listings: [], batches: [], staff: [], notes: {}, counters: {} };

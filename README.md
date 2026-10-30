@@ -56,5 +56,8 @@ Each card, batch and photo carries a copy of the owner's email (`custEmail`). Th
 - **Customers create their own login.** Tell them to go to the site, choose “Create account”, and use the email you have on file for them. They verify it once by email. They stay signed in on that device, and “Forgot password?” emails them a reset link.
 - **Free-plan email limits:** 1,000 verification emails and 150 password-reset emails a day.
 
+## Publishing changes
+Run `./stamp.sh` before each push. It tags every script and stylesheet with a new version so browsers load the update right away instead of an old saved copy.
+
 ## Testing locally
 Open the site from `localhost` and it connects to the Firebase emulators (`firebase emulators:start --only auth,firestore`) instead of the live project.
