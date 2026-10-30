@@ -3,8 +3,8 @@
 export const $ = (s, r = document) => r.querySelector(s);
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const money = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
-export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards" };
-export const STAT = { curating: "Being curated", live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid out" };
+export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards", goldin: "Goldin", shibe: "Shibe Sports", other: "Other" };
+export const STAT = { curating: "Being curated", live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you" };
 export const pad6 = n => String(n).padStart(6, "0");
 export const plural = n => `${n} card${n === 1 ? "" : "s"}`;
 export const isSold = l => l.status === "sold" || l.status === "paid";
@@ -16,11 +16,12 @@ export function payLine(c) {
   if (c.payMethod === "other") return c.payTo || "Other";
   return PAYM[c.payMethod] + (c.payTo ? ` ${c.payTo}` : "");
 }
+// The consignor's share of one sale. Cards imported from the old system carry their exact portion.
+export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.price || 0) * (c?.rate ?? 85) / 100;
 // What Wheelhouse owes this consignor right now: sold-but-unpaid cards at their rate, plus any carried-over balance.
 export function owedFor(c, listings) {
-  const rate = (c?.rate ?? 85) / 100;
   const sold = listings.filter(l => l.cust === c.id && l.status === "sold");
-  return { cards: sold, amount: sold.reduce((s, l) => s + (l.price || 0) * rate, 0) + (c?.payable || 0) };
+  return { cards: sold, amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + (c?.payable || 0) };
 }
 
 export function detect(url) {
@@ -153,7 +154,7 @@ export function dashboardMarkup(pickerHtml = "") {
       <button type="button" data-t="all" aria-pressed="false">Everything</button>
       <button type="button" data-t="batches" aria-pressed="false">Batches</button>
     </div>
-    <select data-d="plat" style="width:auto" aria-label="Platform"><option value="">Both platforms</option><option value="fan">Fanatics Collect</option><option value="pcs">PC Sportscards (eBay)</option></select>
+    <select data-d="plat" style="width:auto" aria-label="Platform"><option value="">All auction houses</option>${Object.entries(PLAT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
   </div>
   <div class="cards" data-d="cards"></div>
   <div class="muted" style="font-size:12px">Prices and bids are updated by Wheelhouse staff. Tap “View listing” to see the live page on Fanatics Collect or eBay.</div>`;
@@ -181,7 +182,7 @@ export function mountDashboard(root, pickerHtml) {
     const mine = listings;
     const live = mine.filter(l => l.status === "live"), liveVal = live.reduce((s, l) => s + (l.price || 0), 0);
     const thirty = Date.now() - 30 * 864e5, sold30 = mine.filter(l => isSold(l) && new Date(l.soldDate || 0) > thirty);
-    const owed = mine.filter(l => l.status === "sold").reduce((s, l) => s + (l.price || 0) * rate, 0) + (c.payable || 0);
+    const owed = mine.filter(l => l.status === "sold").reduce((s, l) => s + cardPayout(l, c), 0) + (c.payable || 0);
     const lastPaid = (c.payouts || []).slice(-1)[0];
     const ending = live.filter(l => l.format === "auction" && endsSoon(l)).length;
     q("stats").innerHTML = [
@@ -236,14 +237,15 @@ export function mountDashboard(root, pickerHtml) {
       let label, sub;
       if (l.status === "live") { label = l.format === "bin" ? "Asking" : "Current bid"; sub = l.format === "bin" ? "Buy It Now" : (tl ? `<span class="${endsSoon(l) ? "soon" : ""}">Ends in ${tl}</span>` : "Auction"); }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
-      else if (isSold(l)) { label = "Sold for"; sub = `You receive ${money((l.price || 0) * rate)}` + (l.status === "paid" ? " · paid" : ""); }
+      else if (isSold(l)) { label = "Sold for"; sub = `You receive ${money(cardPayout(l, c))}` + (l.status === "paid" ? " · paid" : ""); }
+      else if (l.status === "returned") { label = "Returned to you"; sub = ""; }
       else { label = "Did not sell"; sub = "Ask us about relisting"; }
       return `<article class="card">
         <div style="display:grid;gap:6px;min-width:0">
           <div class="t">${esc(l.title)}</div>
           <div class="meta"><span class="code">SKU ${esc(l.sku)}</span>${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
         </div>
-        <div class="right"><span class="sub">${label}</span><span class="amt">${l.status === "unsold" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
+        <div class="right"><span class="sub">${label}</span><span class="amt">${l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
       </article>`;
     }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
   }

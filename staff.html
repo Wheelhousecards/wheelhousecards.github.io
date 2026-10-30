@@ -107,6 +107,7 @@
         <label class="itype"><input type="radio" name="itype" value="full" id="it-full" checked><span><b>Wheelhouse sheet</b><small>Consignor, link, card, grade and cert are already filled in. Cards go straight to each consignor.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="pcs" id="it-pcs"><span><b>PC Sportscards CSV</b><small>No consignor info. Cards come in unassigned, then you pick who owns them.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="fan" id="it-fan"><span><b>Fanatics export + links</b><small>Fanatics’ collection export with a Link column you add. Each row is matched to the card you already entered (by cert, then title) and goes live.</small></span></label>
+        <label class="itype"><input type="radio" name="itype" value="hist" id="it-hist"><span><b>Consignment history</b><small>The item export from the old consignment system. Brings in every past consignment with its sale, payout and return history.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="cust" id="it-cust"><span><b>Consignor list</b><small>Names, emails, phones and payout %. Creates a consignor for each row so they can sign in.</small></span></label>
       </div>
       <label class="drop" id="drop"><input type="file" id="i-file" accept=".csv,.tsv,.txt,.xlsx,.xls"><span id="drop-t"><b>Choose a file</b> or drop it here</span></label>
@@ -114,6 +115,8 @@
         <div><h3>Match the columns</h3><div class="muted" style="font-size:12px;margin-top:2px" id="i-help">These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.</div></div>
         <div class="map" id="i-fields"></div>
         <div style="display:grid;gap:4px;max-width:420px" id="i-batchwrap"><label for="i-batch">Put these cards in a batch</label><select id="i-batch"></select><span class="muted" style="font-size:12px">Cards with no consignor take the batch’s customer.</span></div>
+        <div id="i-limitwrap" hidden style="display:grid;gap:4px;max-width:420px"><label for="i-limit">Bring in</label><select id="i-limit"><option value="0">Every card in the file</option><option value="1500">Most recent 1,500 cards</option><option value="500">Most recent 500 cards</option></select><span class="muted" style="font-size:12px">Cards still out and cards awaiting payout always come in. Older paid-out and returned cards are left off when you pick a limit.</span></div>
+        <label class="itype" id="i-optwrap" hidden style="padding:8px 10px"><input type="checkbox" id="i-unpaid"><span>Count sales marked <b>Paid (Yes?) = No</b> as still owed<small id="i-unpaid-note"></small></span></label>
         <div id="i-sum" style="font-size:13px"></div>
         <div class="tbl-wrap"><table class="prev"><thead id="i-head"><tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr></thead><tbody id="i-prev"></tbody></table></div>
         <div class="row"><button class="btn" type="button" id="i-go">Import</button><button class="btn ghost" type="button" id="i-cancel">Cancel</button></div>
@@ -127,7 +130,7 @@
       <div class="bulkbar" id="bulkbar" hidden>
         <b id="bb-n"></b>
         <span class="grp"><select id="bb-cust" aria-label="Consignor to assign"></select><button class="btn sm" type="button" id="bb-cust-go">Assign</button></span>
-        <span class="grp"><select id="bb-st" aria-label="Status to set"><option value="curating">Being curated</option><option value="live">Live</option><option value="sold">Sold</option><option value="unsold">Unsold</option><option value="paid">Paid out</option></select><button class="btn ghost sm" type="button" id="bb-st-go">Set status</button></span>
+        <span class="grp"><select id="bb-st" aria-label="Status to set"><option value="curating">Being curated</option><option value="live">Live</option><option value="sold">Sold</option><option value="unsold">Unsold</option><option value="paid">Paid out</option><option value="returned">Returned to owner</option></select><button class="btn ghost sm" type="button" id="bb-st-go">Set status</button></span>
         <span class="grp"><select id="bb-fmt" aria-label="Format to set"><option value="auction">Auction</option><option value="bin">Buy It Now</option></select><button class="btn ghost sm" type="button" id="bb-fmt-go">Set format</button></span>
         <span class="grp"><select id="bb-batch" aria-label="Batch to add to"></select><button class="btn ghost sm" type="button" id="bb-batch-go">Add to batch</button></span>
         <button class="btn ghost sm" type="button" id="bb-del">Remove</button>
@@ -137,10 +140,11 @@
       <div class="filters">
         <input id="f-q" placeholder="Search SKU, cert #, card or item #" aria-label="Search cards">
         <select id="f-cust" aria-label="Filter by consignor"></select>
-        <select id="f-plat" aria-label="Filter by platform"><option value="">All platforms</option><option value="fan">Fanatics Collect</option><option value="pcs">PC Sportscards (eBay)</option></select>
-        <select id="f-st" aria-label="Filter by status"><option value="">All statuses</option><option value="curating">Being curated</option><option value="live">Live</option><option value="sold">Sold</option><option value="unsold">Unsold / returned</option><option value="paid">Paid out</option></select>
+        <select id="f-plat" aria-label="Filter by platform"><option value="">All auction houses</option><option value="fan">Fanatics Collect</option><option value="pcs">PC Sportscards (eBay)</option><option value="goldin">Goldin</option><option value="shibe">Shibe Sports</option><option value="other">Other</option></select>
+        <select id="f-st" aria-label="Filter by status"><option value="">All statuses</option><option value="curating">Being curated</option><option value="live">Live</option><option value="sold">Sold</option><option value="unsold">Unsold</option><option value="paid">Paid out</option><option value="returned">Returned to owner</option></select>
         <select id="f-batch" aria-label="Filter by batch"></select>
       </div>
+      <button class="btn ghost sm" type="button" id="f-hist" style="justify-self:start">Show paid-out and returned cards too</button>
       <div class="tbl-wrap"><table>
         <thead><tr><th><input type="checkbox" id="selAll" aria-label="Select all cards shown"></th><th>SKU</th><th>Consignor</th><th>Platform</th><th>Card</th><th>Grade</th><th>Format</th><th>Price / bid</th><th>Ends</th><th>Status</th><th>Link</th><th></th></tr></thead>
         <tbody id="tbody"></tbody>
