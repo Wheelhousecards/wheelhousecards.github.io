@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261030144258";
+import { db, logout } from "./firebase.js?v=20261030153823";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -7,9 +7,9 @@ import {
 import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
-  isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto
-} from "./ui.js?v=20261030144258";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030144258";
+  isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout
+} from "./ui.js?v=20261030153823";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030153823";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -35,7 +35,7 @@ function loadHistory() {
   return histReady;
 }
 const custHist = new Map();
-const ui = { mode: "staff", cv: "", sel: new Set(), visible: [] };
+const ui = { view: "play", mode: "staff", cv: "", sel: new Set(), visible: [] };
 let me = "", unsubs = [], ready = new Set();
 const custById = id => S.customers.find(c => c.id === id);
 const batchById = id => S.batches.find(b => b.id === id);
@@ -228,14 +228,21 @@ function renderLedger() {
   const fb = $("#f-batch").value;
   $("#f-batch").innerHTML = batchOptions(fb, `<option value="">All batches</option><option value="__nob"${fb === "__nob" ? " selected" : ""}>Not in a batch</option>`);
   const q = $("#f-q").value.trim().toLowerCase(), fp = $("#f-plat").value, fs = $("#f-st").value;
-  const rows = S.listings.filter(l =>
+  const view = ui.view, past = view === "paid" || view === "returned" || view === "all";
+  const loading = past && !S.hist;
+  const rows = (loading ? [] : S.listings).filter(l =>
+    (view === "all" || (view === "play" ? !PAST.includes(l.status) : l.status === view)) &&
     (!fc || (fc === "__none" ? !custById(l.cust) : l.cust === fc)) &&
     (!fp || l.plat === fp) && (!fs || l.status === fs) &&
     (!fb || (fb === "__nob" ? !batchById(l.batch) : l.batch === fb)) &&
     (!q || [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q))
-  ).sort((a, b) => (a.status === "live" ? 0 : 1) - (b.status === "live" ? 0 : 1) || (b.sku || "").localeCompare(a.sku || ""));
-  $("#count").textContent = `${rows.length} of ${S.listings.length} cards` + (S.hist ? "" : " in play");
-  $("#f-hist").hidden = !!S.hist;
+  ).sort(view === "paid" || view === "returned"
+    ? (a, b) => (b.soldDate || b.added || "").localeCompare(a.soldDate || a.added || "") || (b.sku || "").localeCompare(a.sku || "")
+    : (a, b) => (a.status === "live" ? 0 : 1) - (b.status === "live" ? 0 : 1) || (b.sku || "").localeCompare(a.sku || ""));
+  const viewName = { play: "in play", paid: "paid out", returned: "returned", all: "in total" }[view];
+  $("#count").textContent = loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
+  $("#th-price").textContent = view === "paid" ? "Sale / to consignor" : "Price / bid";
+  $("#th-when").textContent = view === "paid" ? "Sold" : view === "returned" ? "Added" : "Ends";
   ui.visible = rows.map(l => l.id);
   const custSel = [...S.customers].sort(byName).map(x => `<option value="${x.id}">${esc(x.name)} · ${esc(x.code)}</option>`).join("");
   const shown = rows.slice(0, 500);
@@ -249,8 +256,8 @@ function renderLedger() {
       <td class="title">${l.photo ? `<img src="${l.photo.thumb}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px">` : ""}${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
       <td>${l.format === "bin" ? "Buy It Now" : "Auction"}</td>
-      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}"></td>
-      <td class="num">${l.format === "auction" && l.status === "live" ? esc(timeLeft(l.ends)) : ""}</td>
+      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${money(cardPayout(l, custById(l.cust)))} to consignor</div>` : ""}</td>
+      <td class="num">${l.status === "live" && l.format === "auction" ? esc(timeLeft(l.ends)) : PAST.includes(l.status) || l.status === "sold" ? esc(fmtDay((l.soldDate || l.added || "").slice(0, 10))) : ""}</td>
       <td><select data-f="status" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select></td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
       <td><button class="x" type="button" data-del aria-label="Remove SKU ${esc(l.sku)}">${delOne === l.id ? "Sure?" : "×"}</button></td></tr>`;
@@ -260,9 +267,15 @@ function renderLedger() {
 }
 $("#tbody").addEventListener("focusout", () => setTimeout(() => { if ($("#tbody").dataset.stale && !$("#tbody").contains(document.activeElement)) renderLedger(); }, 0));
 ["#f-q", "#f-cust", "#f-plat", "#f-st", "#f-batch"].forEach(s => $(s).addEventListener("input", renderLedger));
-$("#f-hist").addEventListener("click", e => { e.target.disabled = true; e.target.textContent = "Loading past cards…"; loadHistory(); });
-$("#f-st").addEventListener("change", e => { if (PAST.includes(e.target.value)) loadHistory(); });
-$("#f-q").addEventListener("change", e => { if (e.target.value.trim() && !S.hist && !S.listings.some(l => [l.sku, l.title, l.cert].join(" ").toLowerCase().includes(e.target.value.trim().toLowerCase()))) loadHistory(); });
+function setView(v) {
+  ui.view = v; ui.sel.clear();
+  [...$("#views").children].forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v));
+  if (v !== "play") loadHistory();
+  renderLedger();
+}
+$("#views").addEventListener("click", e => { const v = e.target.dataset.v; if (v) setView(v); });
+$("#f-st").addEventListener("change", e => { if (PAST.includes(e.target.value) && ui.view === "play") setView("all"); });
+$("#f-q").addEventListener("change", e => { const q = e.target.value.trim().toLowerCase(); if (q && ui.view === "play" && !S.listings.some(l => !PAST.includes(l.status) && [l.sku, l.title, l.cert].join(" ").toLowerCase().includes(q))) { setView("all"); $("#ledger-msg").textContent = "Nothing in play matched, so this shows everything, including paid-out and returned cards."; } });
 $("#c-q").addEventListener("input", renderCustList);
 
 /* ---------- add a listing ---------- */
