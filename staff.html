@@ -92,14 +92,15 @@
       <div class="imp-types" role="radiogroup" aria-label="Spreadsheet type">
         <label class="itype"><input type="radio" name="itype" value="full" id="it-full" checked><span><b>Wheelhouse sheet</b><small>Consignor, link, card, grade and cert are already filled in. Cards go straight to each consignor.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="pcs" id="it-pcs"><span><b>PC Sportscards CSV</b><small>No consignor info. Cards come in unassigned, then you pick who owns them.</small></span></label>
+        <label class="itype"><input type="radio" name="itype" value="cust" id="it-cust"><span><b>Consignor list</b><small>Names, emails, phones and payout %. Creates a consignor for each row so they can sign in.</small></span></label>
       </div>
       <label class="drop" id="drop"><input type="file" id="i-file" accept=".csv,.tsv,.txt,.xlsx,.xls"><span id="drop-t"><b>Choose a file</b> or drop it here</span></label>
       <div id="i-map" hidden style="display:grid;gap:12px">
-        <div><h3>Match the columns</h3><div class="muted" style="font-size:12px;margin-top:2px">These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.</div></div>
+        <div><h3>Match the columns</h3><div class="muted" style="font-size:12px;margin-top:2px" id="i-help">These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.</div></div>
         <div class="map" id="i-fields"></div>
-        <div style="display:grid;gap:4px;max-width:420px"><label for="i-batch">Put these cards in a batch</label><select id="i-batch"></select><span class="muted" style="font-size:12px">Cards with no consignor take the batch’s customer.</span></div>
+        <div style="display:grid;gap:4px;max-width:420px" id="i-batchwrap"><label for="i-batch">Put these cards in a batch</label><select id="i-batch"></select><span class="muted" style="font-size:12px">Cards with no consignor take the batch’s customer.</span></div>
         <div id="i-sum" style="font-size:13px"></div>
-        <div class="tbl-wrap"><table class="prev"><thead><tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr></thead><tbody id="i-prev"></tbody></table></div>
+        <div class="tbl-wrap"><table class="prev"><thead id="i-head"><tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr></thead><tbody id="i-prev"></tbody></table></div>
         <div class="row"><button class="btn" type="button" id="i-go">Import</button><button class="btn ghost" type="button" id="i-cancel">Cancel</button></div>
       </div>
       <div class="detect" id="i-msg" role="status"></div>

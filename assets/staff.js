@@ -556,9 +556,20 @@ function cellStr(v) {
   if (typeof v === "number") return Number.isInteger(v) ? v.toFixed(0) : String(v);
   return String(v ?? "").trim();
 }
+// Columns for a consignor list. Order matters: email is matched before name so "Customer Email" isn't taken as the name.
+const CFIELDS = [
+  { k: "email", label: "Email (their login)", re: /e-?mail/i },
+  { k: "first", label: "First name", re: /first/i },
+  { k: "last", label: "Last name", re: /last|surname/i },
+  { k: "name", label: "Full name", re: /name|consignor|customer|client/i },
+  { k: "phone", label: "Phone", re: /phone|cell|mobile|tel/i },
+  { k: "rate", label: "Payout % (what they keep)", re: /payout|rate|split|percent|%/i },
+  { k: "code", label: "Consignor code", re: /code|account|cust.?id/i },
+];
+const fieldsFor = type => type === "cust" ? CFIELDS : FIELDS.filter(f => !f.only || f.only === type);
 function guessMap(headers, type) {
   const map = {}, used = new Set();
-  FIELDS.forEach(f => {
+  (type === "cust" ? CFIELDS : FIELDS).forEach(f => {
     if (f.only && f.only !== type) { map[f.k] = -1; return; }
     const i = headers.findIndex((h, ix) => !used.has(ix) && f.re.test(h));
     map[f.k] = i; if (i >= 0) used.add(i);
@@ -632,13 +643,66 @@ function planImport() {
     return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends, status: status || "live", soldDate: (status === "sold" || status === "paid") ? now() : "" } };
   }).filter(Boolean);
 }
+function planCust() {
+  const m = imp.map;
+  const byEmail = new Map(S.customers.filter(c => c.email).map(c => [c.email.toLowerCase(), c]));
+  const byName = new Map(S.customers.map(c => [c.name.toLowerCase(), c]));
+  const codes = new Set(S.customers.map(c => c.code));
+  const seen = new Set();
+  let n = S.customers.length + 1;
+  return imp.rows.map(r => {
+    const g = k => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
+    let name = g("name") || [g("first"), g("last")].filter(Boolean).join(" ");
+    if (g("name") && g("last") && !g("name").includes(g("last"))) name = [g("name"), g("last")].join(" ");
+    name = name.replace(/\s+/g, " ").trim();
+    const email = g("email").toLowerCase();
+    if (!name && !email) return null;
+    const label = name || email;
+    if (!name) return { act: "skip", why: "No name", label, email };
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { act: "skip", why: "Email doesn’t look right", label, email };
+    if (email && seen.has(email)) return { act: "skip", why: "Same email is in the file twice", label, email };
+    if (email) seen.add(email);
+    const ex = (email && byEmail.get(email)) || (!email && byName.get(name.toLowerCase()));
+    if (ex) return { act: "skip", why: `Already a consignor (${ex.code})`, label, email };
+    const phone = fmtPhone(g("phone"));
+    let rate = parseFloat(g("rate").replace(/[^0-9.]/g, ""));
+    if (rate > 0 && rate <= 1) rate = Math.round(rate * 1000) / 10;
+    if (isNaN(rate) || rate < 0 || rate > 100) rate = 85;
+    let code = g("code").toUpperCase().replace(/\s+/g, "");
+    if (!code || codes.has(code)) {
+      const init = name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase().padEnd(2, "X");
+      do { code = init + String(n++).padStart(2, "0"); } while (codes.has(code));
+    }
+    codes.add(code);
+    return { act: "new", label: name, email, warn: email ? "" : "No email, so they can’t sign in until you add one", data: { code, name, email, phone, rate } };
+  }).filter(Boolean);
+}
+function renderCustImport() {
+  $("#i-batchwrap").hidden = true;
+  $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Use either Full name, or First and Last name. People already in the system (same email) are skipped, so you can upload the same list again safely.";
+  $("#i-head").innerHTML = "<tr><th>Result</th><th>Name</th><th>Email</th><th>Phone</th><th>Payout</th></tr>";
+  const plan = planCust(), n = a => plan.filter(p => p.act === a).length;
+  const noEmail = plan.filter(p => p.act === "new" && !p.data.email).length;
+  $("#i-sum").innerHTML = `<span class="act-new">${n("new")} new consignor${n("new") === 1 ? "" : "s"}</span> · <span class="act-skip">${n("skip")} skipped</span>${noEmail ? ` · <span class="need">${noEmail} without an email</span>` : ""}`;
+  $("#i-prev").innerHTML = plan.slice(0, 10).map(p => {
+    const d = p.data;
+    const act = p.act === "new" ? `<span class="act-new">New · ${esc(d.code)}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
+    return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td style="overflow-wrap:anywhere">${esc(p.email || "")}${p.warn ? `<div class="cert">${esc(p.warn)}</div>` : ""}</td><td class="num">${d ? esc(d.phone) : ""}</td><td class="num">${d ? d.rate + "%" : ""}</td></tr>`;
+  }).join("") + (plan.length > 10 ? `<tr><td colspan="5" class="muted">…and ${plan.length - 10} more rows</td></tr>` : "");
+  $("#i-go").disabled = !n("new");
+  $("#i-go").textContent = n("new") ? `Add ${n("new")} consignor${n("new") === 1 ? "" : "s"}` : "Nothing to add";
+}
 function renderImport() {
   const box = $("#i-map");
   if (!imp) { box.hidden = true; return; }
   box.hidden = false; const type = itype();
   if (!$("#i-fields").contains(document.activeElement)) {
-    $("#i-fields").innerHTML = FIELDS.filter(f => !f.only || f.only === type).map(f => `<div class="f"><label for="map-${f.k}">${f.label}</label><select id="map-${f.k}" data-k="${f.k}"><option value="-1">Not in file</option>${imp.headers.map((h, i) => `<option value="${i}"${imp.map[f.k] === i ? " selected" : ""}>${esc(h)}</option>`).join("")}</select></div>`).join("");
+    $("#i-fields").innerHTML = fieldsFor(type).map(f => `<div class="f"><label for="map-${f.k}">${f.label}</label><select id="map-${f.k}" data-k="${f.k}"><option value="-1">Not in file</option>${imp.headers.map((h, i) => `<option value="${i}"${imp.map[f.k] === i ? " selected" : ""}>${esc(h)}</option>`).join("")}</select></div>`).join("");
   }
+  if (type === "cust") return renderCustImport();
+  $("#i-batchwrap").hidden = false;
+  $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.";
+  $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr>";
   if (document.activeElement !== $("#i-batch")) $("#i-batch").innerHTML = batchOptions($("#i-batch").value, '<option value="">No batch</option>');
   const plan = planImport(), n = a => plan.filter(p => p.act === a).length;
   const unassigned = plan.filter(p => p.act === "new" && !p.data.cust).length;
@@ -664,6 +728,19 @@ $("#i-fields").addEventListener("change", e => { const k = e.target.dataset.k; i
 $("#i-batch").addEventListener("change", e => { e.target.blur(); renderImport(); });
 $("#i-cancel").addEventListener("click", () => { closeImport(); $("#i-msg").textContent = ""; });
 $("#i-go").addEventListener("click", async () => {
+  if (itype() === "cust") {
+    const fresh = planCust().filter(p => p.act === "new");
+    $("#i-go").disabled = true; $("#i-msg").textContent = `Adding ${fresh.length} consignors…`;
+    const done = await guarded($("#i-msg"), async () => {
+      await commit(fresh.map(p => ["set", doc(col("customers")), { ...p.data, createdAt: serverTimestamp(), createdBy: me }]));
+      return true;
+    });
+    if (!done) { $("#i-go").disabled = false; return; }
+    closeImport();
+    const noEmail = fresh.filter(p => !p.data.email).length;
+    $("#i-msg").textContent = `Added ${fresh.length} consignor${fresh.length === 1 ? "" : "s"}. To see their cards, each one goes to wheelhousecards.github.io, chooses “Create account”, and uses the email you have on file for them.` + (noEmail ? ` ${noEmail} have no email yet. Add one with Edit in the Consignors list before they can sign in.` : "");
+    return;
+  }
   const plan = planImport();
   const fresh = plan.filter(p => p.act === "new"), ups = plan.filter(p => p.act === "update");
   $("#i-go").disabled = true; $("#i-msg").textContent = "Importing…";
