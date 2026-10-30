@@ -1,9 +1,9 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261030141808";
-import { collection, query, where, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261030141808";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030141808";
-import { contact } from "./firebase-config.js?v=20261030141808";
+import { db, logout } from "./firebase.js?v=20261030144258";
+import { collection, query, where, getDocs, getDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261030144258";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030144258";
+import { contact } from "./firebase-config.js?v=20261030144258";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
@@ -12,7 +12,7 @@ $("#gate").innerHTML = gateMarkup("See your consigned cards",
   "Sign in with the email you gave Wheelhouse when you dropped off your cards. First time here? Choose “Create account” and use that same email.");
 
 let unsubs = [], state = { customer: null, listings: [], batches: [] }, me = "";
-const dash = mountDashboard($("#dash"));
+const dash = mountDashboard($("#dash"), "", { loadPhoto: async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; } });
 createLightbox(
   id => state.batches.find(b => b.id === id),
   async b => {

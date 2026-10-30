@@ -117,7 +117,9 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
       ? `<div class="tbl-wrap"><table class="prev" style="min-width:520px"><thead><tr><th>Card</th><th>Sold</th><th>Price</th>${items.some(x => x.net != null) ? "<th>After fees</th>" : ""}<th>Item #</th></tr></thead><tbody>${items.map(x => `<tr><td class="title">${esc(x.title)}</td><td class="num">${x.date ? fmtLong(x.date) : ""}</td><td class="num">${x.price != null ? money(x.price) : ""}</td>${items.some(y => y.net != null) ? `<td class="num">${x.net != null ? money(x.net) : ""}</td>` : ""}<td class="code">${esc(x.item || "")}</td></tr>`).join("")}<tr class="grp"><td>Total</td><td></td><td class="num">${money(gross)}</td>${items.some(x => x.net != null) ? `<td class="num">${money(net)}</td>` : ""}<td></td></tr></tbody></table></div>`
       : `<div class="empty" style="padding:16px">${staff ? `The individual cards for this ${l.plat === "pcs" ? "payout" : "lot"} haven’t been added yet. Upload the PC Sportscards statement below.` : "The card-by-card breakdown for this payout hasn’t been added yet. Ask us if you’d like it."}</div>`) + `</div>`;
   }
+  const photo = l.photo ? `<img class="card-photo" data-photo="${esc(l.photo.id)}" src="${l.photo.thumb}" alt="Photo of ${esc(l.title)}">` : "";
   return `<div style="display:grid;gap:14px">
+    ${photo}
     <div><div class="muted" style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">${isLot(l) ? esc(lotLine(l) || "Lot") : "Card details"}</div><h2 style="text-transform:none;letter-spacing:0;font-size:24px">${esc(l.title)}</h2></div>
     <dl class="dl">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
     ${lot}
@@ -215,7 +217,13 @@ export function dashboardMarkup(pickerHtml = "") {
   <div class="muted" style="font-size:12px">Prices and bids are updated by Wheelhouse staff. Tap “View listing” to see the live page on Fanatics Collect or eBay.</div>`;
 }
 
-export function mountDashboard(root, pickerHtml) {
+// Swap a details window's small photo for the full-size one once it loads.
+export function loadFullPhoto(container, loadPhoto) {
+  const img = container.querySelector("img[data-photo]");
+  if (!img || !loadPhoto) return;
+  loadPhoto(img.dataset.photo).then(src => { if (src && img.isConnected) img.src = src; }).catch(() => {});
+}
+export function mountDashboard(root, pickerHtml, { loadPhoto } = {}) {
   root.innerHTML = dashboardMarkup(pickerHtml);
   const q = k => root.querySelector(`[data-d="${k}"]`);
   let tab = "live", data = null;
@@ -228,7 +236,7 @@ export function mountDashboard(root, pickerHtml) {
   root.addEventListener("click", e => {
     const t = e.target.closest("[data-card]"); if (!t || !data) return;
     const l = data.listings.find(x => x.id === t.dataset.card);
-    if (l) modal.open(cardDetailHtml(l, data.customer));
+    if (l) { modal.open(cardDetailHtml(l, data.customer)); loadFullPhoto(modal.body, loadPhoto); }
   });
 
   function render(next) {
@@ -302,10 +310,10 @@ export function mountDashboard(root, pickerHtml) {
       else if (l.status === "returned") { label = "Returned to you"; sub = ""; }
       else { label = "Did not sell"; sub = "Ask us about relisting"; }
       return `<article class="card">
-        <div style="display:grid;gap:6px;min-width:0">
+        <div style="display:flex;gap:12px;align-items:flex-start;min-width:0">${l.photo ? `<button class="thumb" type="button" data-card="${esc(l.id)}" aria-label="Photo of ${esc(l.title)}"><img src="${l.photo.thumb}" alt=""></button>` : ""}<div style="display:grid;gap:6px;min-width:0">
           <div class="t">${esc(l.title)}</div>
           <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
-        </div>
+        </div></div>
         <div class="right"><span class="sub">${label}</span><span class="amt">${l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span><span class="sub">${sub}</span></div>
       </article>`;
     }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);

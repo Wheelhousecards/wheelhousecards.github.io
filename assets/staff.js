@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261030141808";
+import { db, logout } from "./firebase.js?v=20261030144258";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -7,9 +7,9 @@ import {
 import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
-  isLot, lotLine, cardDetailHtml, createModal
-} from "./ui.js?v=20261030141808";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030141808";
+  isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto
+} from "./ui.js?v=20261030144258";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030144258";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -70,6 +70,14 @@ async function bump(field, value) {
 }
 // ops: [["set"|"update"|"delete", ref, data]]
 async function commit(ops) {
+  // When a card changes owner, its photo has to follow so the new owner can open it.
+  const fix = new Map();
+  ops.forEach(([t, ref, data]) => {
+    if (t !== "update" || !data || !("custEmail" in data)) return;
+    const l = S.listings.find(x => x.id === ref.id);
+    if (l?.photo?.id && !fix.has(l.photo.id)) fix.set(l.photo.id, ["update", doc(db, "photos", l.photo.id), { cust: data.cust ?? l.cust ?? "", custEmail: data.custEmail }]);
+  });
+  ops = [...ops, ...fix.values()];
   for (let i = 0; i < ops.length; i += 400) {
     const b = writeBatch(db);
     ops.slice(i, i + 400).forEach(([t, ref, data]) => {
@@ -121,7 +129,8 @@ function listen() {
 }
 
 /* ---------- shell ---------- */
-const dash = mountDashboard($("#cust"), `<div class="sel" style="display:grid;gap:4px;width:min(280px,100%)"><label for="cv-pick">Preview as consignor</label><select id="cv-pick"></select></div>`);
+const loadPhoto = async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; };
+const dash = mountDashboard($("#cust"), `<div class="sel" style="display:grid;gap:4px;width:min(280px,100%)"><label for="cv-pick">Preview as consignor</label><select id="cv-pick"></select></div>`, { loadPhoto });
 $("#cv-pick").addEventListener("change", e => { ui.cv = e.target.value; try { history.replaceState({ v: "cust", cv: ui.cv }, "", "#customer"); } catch (err) {} render(); });
 // Opening a customer page adds a browser history entry, so the browser's back button
 // (and the "Back to staff" button) returns to the staff app where you left off.
@@ -237,7 +246,7 @@ function renderLedger() {
       <td class="code num"><button class="linkbtn code" type="button" data-open="${l.id}" aria-label="Details for SKU ${esc(l.sku)}">${esc(l.sku)}</button>${l.batch && batchById(l.batch) ? `<div class="cert">${esc(l.batch)}</div>` : ""}</td>
       <td>${c ? `<span class="code">${esc(c.code)}</span> ${esc(c.name)}` : `<select data-f="cust" aria-label="Assign a consignor to SKU ${esc(l.sku)}" style="border-color:var(--paid)"><option value="">Needs consignor…</option>${custSel}</select>`}</td>
       <td><span class="chip ${l.plat}">${l.plat === "fan" ? "Fanatics" : "PCS / eBay"}</span></td>
-      <td class="title">${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
+      <td class="title">${l.photo ? `<img src="${l.photo.thumb}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px">` : ""}${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
       <td>${l.format === "bin" ? "Buy It Now" : "Auction"}</td>
       <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}"></td>
@@ -404,6 +413,7 @@ function openDetail(id) {
       <div class="f w6"><label for="d-url">Listing link</label><input id="d-url" value="${v(l.url)}" placeholder="Paste the Fanatics Collect or eBay link"></div>
       <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="d-msg" role="status"></span></div></div>
     </form>
+    ${photoSection(l)}
     ${lot ? `<div style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:14px">
       <h3>${l.items?.length ? "Replace the cards in this lot" : "Add the cards in this lot"}</h3>
       <div class="muted" style="font-size:12px">Upload the PC Sportscards statement (CSV or Excel) for ${l.period ? esc(l.period) : "this payout"}. If the file covers more than this consignor, filter it down to their cards first.</div>
@@ -412,6 +422,25 @@ function openDetail(id) {
       <div id="d-prev" style="font-size:13px"></div>
       <div class="row"><button class="btn" type="button" id="d-items-go" hidden>Save cards to this lot</button></div>
     </div>` : ""}`);
+  loadFullPhoto(detail.body, loadPhoto);
+}
+// Other PC Sportscards cards in the same batch can share one photo.
+const photoMates = l => l.plat === "pcs" && l.batch ? S.listings.filter(x => x.id !== l.id && x.plat === "pcs" && x.batch === l.batch && x.cust === l.cust) : [];
+function photoSection(l) {
+  const mates = photoMates(l);
+  const note = isLot(l) ? "This photo covers every card in this lot." : l.plat === "fan" ? "Shows on the customer’s page next to this card." : "";
+  return `<div style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:14px">
+    <h3>Photo</h3>
+    ${note ? `<div class="muted" style="font-size:12px">${note}</div>` : ""}
+    <label class="drop"><input type="file" id="d-photo" accept="image/*"><span><b>${l.photo ? "Replace the photo" : "Add a photo"}</b> or drop it here</span></label>
+    ${mates.length ? `<label class="itype" style="padding:8px 10px"><input type="checkbox" id="d-photo-all" checked><span>Use this photo for all ${mates.length + 1} PC Sportscards cards in batch <span class="code">${esc(l.batch)}</span></span></label>` : ""}
+    <div class="row">${l.photo ? `<button class="btn ghost sm" type="button" id="d-photo-rm">Remove photo${mates.some(x => x.photo?.id === l.photo.id) ? " from this card" : ""}</button>` : ""}<span class="detect" id="d-photo-msg" role="status"></span></div>
+  </div>`;
+}
+async function dropPhotoIfUnused(id, exceptIds) {
+  if (!id) return;
+  if (S.listings.some(x => !exceptIds.includes(x.id) && x.photo?.id === id)) return;
+  try { await deleteDoc(doc(db, "photos", id)); } catch (e) {}
 }
 function renderStmt() {
   if (!stmt) return;
@@ -445,7 +474,27 @@ detail.body.addEventListener("submit", async e => {
   const ok = await guarded($("#d-msg"), async () => { await updateDoc(listingRef(l.id), { ...patch, updatedAt: serverTimestamp() }); return true; });
   if (ok) { Object.assign(l, patch); openDetail(l.id); $("#d-msg").textContent = "Saved."; }
 });
-detail.body.addEventListener("change", e => {
+detail.body.addEventListener("change", async e => {
+  if (e.target.id === "d-photo") {
+    const file = e.target.files[0]; if (!file) return;
+    const l = S.listings.find(x => x.id === openCard); if (!l) return;
+    const msg = $("#d-photo-msg"); msg.textContent = "Preparing photo…";
+    const full = await fullPhoto(file), thumb = full && await shrink(file, 220, .7);
+    if (!full || !thumb) { msg.textContent = "That file isn’t an image. Choose a JPG or PNG photo."; return; }
+    const targets = [l, ...($("#d-photo-all")?.checked ? photoMates(l) : [])];
+    msg.textContent = "Saving…";
+    const ok = await guarded(msg, async () => {
+      const ref = doc(col("photos"));
+      await setDoc(ref, { listing: l.id, cust: l.cust || "", custEmail: emailOf(l.cust), data: full, createdAt: serverTimestamp() });
+      const photo = { id: ref.id, thumb }, old = [...new Set(targets.map(x => x.photo?.id).filter(Boolean))];
+      await commit(targets.map(x => upd(x.id, { photo })));
+      targets.forEach(x => { x.photo = photo; });
+      for (const id of old) await dropPhotoIfUnused(id, []);
+      return targets.length;
+    });
+    if (ok) { openDetail(l.id); $("#d-photo-msg").textContent = ok > 1 ? `Photo added to ${ok} cards.` : "Photo added."; }
+    return;
+  }
   if (e.target.id === "d-file") {
     const file = e.target.files[0]; if (!file || !window.XLSX) return;
     const fr = new FileReader();
@@ -468,6 +517,13 @@ detail.body.addEventListener("change", e => {
   if (k && stmt && e.target.id.startsWith("sm-")) { stmt.map[k] = parseInt(e.target.value, 10); e.target.blur(); renderStmt(); }
 });
 detail.body.addEventListener("click", async e => {
+  if (e.target.id === "d-photo-rm") {
+    const l = S.listings.find(x => x.id === openCard); if (!l?.photo) return;
+    const id = l.photo.id;
+    const ok = await guarded($("#d-photo-msg"), async () => { await updateDoc(listingRef(l.id), { photo: null, updatedAt: serverTimestamp() }); l.photo = null; await dropPhotoIfUnused(id, [l.id]); return true; });
+    if (ok) { openDetail(l.id); $("#d-photo-msg").textContent = "Photo removed."; }
+    return;
+  }
   if (e.target.id !== "d-items-go" || !stmt?.items?.length) return;
   const l = S.listings.find(x => x.id === openCard); if (!l) return;
   const items = stmt.items.slice(0, 2000);
@@ -546,7 +602,7 @@ $("#tbody").addEventListener("change", async e => {
   if (e.target.classList.contains("sel")) { e.target.checked ? ui.sel.add(l.id) : ui.sel.delete(l.id); tr.classList.toggle("on", e.target.checked); delArm = false; renderBulk(); return; }
   const f = e.target.dataset.f;
   await guarded($("#ledger-msg"), async () => {
-    if (f === "cust" && e.target.value) { await updateDoc(listingRef(l.id), { cust: e.target.value, custEmail: emailOf(e.target.value), updatedAt: serverTimestamp() }); lmsg(`SKU ${l.sku} assigned to ${custById(e.target.value).name}.`); }
+    if (f === "cust" && e.target.value) { await commit([upd(l.id, { cust: e.target.value, custEmail: emailOf(e.target.value) })]); lmsg(`SKU ${l.sku} assigned to ${custById(e.target.value).name}.`); }
     if (f === "url") {
       const url = e.target.value.trim(); if (!url) return;
       const d = detect(url);
