@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='3' width='18' height='26' rx='3' fill='%231d5a86'/%3E%3Crect x='10' y='6' width='12' height='5' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="assets/app.css?v=20261030153823">
+<link rel="stylesheet" href="assets/app.css?v=20261030164740">
 </head>
 <body>
 <header><div class="wrap">
@@ -105,7 +105,7 @@
       <div class="row" style="justify-content:space-between"><h2>Import a spreadsheet</h2><span class="muted" style="font-size:12px">CSV or Excel (.xlsx)</span></div>
       <div class="imp-types" role="radiogroup" aria-label="Spreadsheet type">
         <label class="itype"><input type="radio" name="itype" value="full" id="it-full" checked><span><b>Wheelhouse sheet</b><small>Consignor, link, card, grade and cert are already filled in. Cards go straight to each consignor.</small></span></label>
-        <label class="itype"><input type="radio" name="itype" value="pcs" id="it-pcs"><span><b>PC Sportscards CSV</b><small>No consignor info. Cards come in unassigned, then you pick who owns them.</small></span></label>
+        <label class="itype"><input type="radio" name="itype" value="pcs" id="it-pcs"><span><b>PC Sportscards export</b><small>“My Consignments” export. Only the newest rows are read. Cards you already have are updated, and new cards come in for you to assign.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="fan" id="it-fan"><span><b>Fanatics export + links</b><small>Fanatics’ collection export with a Link column you add. Each row is matched to the card you already entered (by cert, then title) and goes live.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="hist" id="it-hist"><span><b>Consignment history</b><small>The item export from the old consignment system. Brings in every past consignment with its sale, payout and return history.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="cust" id="it-cust"><span><b>Consignor list</b><small>Names, emails, phones and payout %. Creates a consignor for each row so they can sign in.</small></span></label>
@@ -115,6 +115,10 @@
         <div><h3>Match the columns</h3><div class="muted" style="font-size:12px;margin-top:2px" id="i-help">These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.</div></div>
         <div class="map" id="i-fields"></div>
         <div style="display:grid;gap:4px;max-width:420px" id="i-batchwrap"><label for="i-batch">Put these cards in a batch</label><select id="i-batch"></select><span class="muted" style="font-size:12px">Cards with no consignor take the batch’s customer.</span></div>
+        <div id="i-pcswrap" hidden class="map">
+          <div class="f"><label for="i-recent">Read the newest</label><select id="i-recent"><option value="500">500 rows</option><option value="1000">1,000 rows</option><option value="2500">2,500 rows</option><option value="0">Whole file</option></select></div>
+          <div class="f"><label for="i-cutoff">Already paid out before</label><input id="i-cutoff" type="date"><span class="muted" style="font-size:12px">Cards PC Sportscards paid you for before this date were in an earlier monthly payout, so they’re left out.</span></div>
+        </div>
         <div id="i-limitwrap" hidden style="display:grid;gap:4px;max-width:420px"><label for="i-limit">Bring in</label><select id="i-limit"><option value="0">Every card in the file</option><option value="1500">Most recent 1,500 cards</option><option value="500">Most recent 500 cards</option></select><span class="muted" style="font-size:12px">Cards still out and cards awaiting payout always come in. Older paid-out and returned cards are left off when you pick a limit.</span></div>
         <label class="itype" id="i-optwrap" hidden style="padding:8px 10px"><input type="checkbox" id="i-unpaid"><span>Count sales marked <b>Paid (Yes?) = No</b> as still owed<small id="i-unpaid-note"></small></span></label>
         <div id="i-sum" style="font-size:13px"></div>
@@ -174,6 +178,6 @@
 </div></main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="assets/staff.js?v=20261030153823"></script>
+<script type="module" src="assets/staff.js?v=20261030164740"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261030153823";
+import { db, logout } from "./firebase.js?v=20261030164740";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -8,8 +8,8 @@ import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout
-} from "./ui.js?v=20261030153823";
-import { setupGate, gateMarkup } from "./gate.js?v=20261030153823";
+} from "./ui.js?v=20261030164740";
+import { setupGate, gateMarkup } from "./gate.js?v=20261030164740";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -951,7 +951,23 @@ const HFIELDS = [
   { k: "tagPrice", label: "Tag price", re: /^tag price$/i },
   { k: "auction", label: "Auction No. / payout month", re: /^auction/i },
 ];
-const FLISTS = { cust: CFIELDS, fan: FFIELDS, hist: HFIELDS };
+// PC Sportscards "My Consignments" export. Cards are identified by PC Sportscards' own Card #.
+const PFIELDS = [
+  { k: "pcsId", label: "PC Sportscards card #", re: /^card ?#$|^card ?(id|no|number)$/i },
+  { k: "title", label: "Card", re: /^card$|title|description/i },
+  { k: "status", label: "Status", re: /^status$/i },
+  { k: "listed", label: "Date listed", re: /listed/i },
+  { k: "soldDate", label: "Date sold", re: /date sold/i },
+  { k: "paidDate", label: "Date paid", re: /date paid/i },
+  { k: "price", label: "Sale price / current bid", re: /sales? price|^price$|current|bid/i },
+  { k: "net", label: "Your payout (after fees)", re: /your payout|payout|^net/i },
+  { k: "grade", label: "Grade (optional)", re: /^grade/i },
+  { k: "cert", label: "Cert # (optional)", re: /cert/i },
+  { k: "item", label: "eBay item # (optional)", re: /item.?(#|id|no|num)|ebay.?(#|id|item)/i },
+  { k: "url", label: "Link (optional)", re: /url|link/i },
+  { k: "ends", label: "Auction ends (optional)", re: /^end|ends|closing/i },
+];
+const FLISTS = { cust: CFIELDS, fan: FFIELDS, hist: HFIELDS, pcs: PFIELDS };
 const fieldsFor = type => FLISTS[type] || FIELDS.filter(f => !f.only || f.only === type);
 function guessMap(headers, type) {
   const map = {}, used = new Set();
@@ -1116,6 +1132,91 @@ function planFan() {
     return { act: "new", auto: true, label, warn: pick ? "" : "No matching card. Added for you to assign.", data: { sku, cust: pick ? pick.cust : "", batch: pick ? pick.id : "", plat: d.plat, url, item: d.item, title, grade, cert, format: d.plat === "pcs" ? "auction" : "bin", price: null, ends: "", status: "live", soldDate: "" } };
   }).filter(Boolean);
 }
+function pcsStatus(st) {
+  st = st.toLowerCase();
+  if (/received payment|paid/.test(st)) return "received";
+  if (/sold/.test(st) && !/unsold/.test(st)) return "sold";
+  if (/listed|active/.test(st)) return "live";
+  if (/unsold|cancel|return|ended|expired/.test(st)) return "unsold";
+  return "";
+}
+const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1, 12).toISOString().slice(0, 10); };
+function planPcs() {
+  const m = imp.map, pick = batchById($("#i-batch").value);
+  const recent = parseInt($("#i-recent").value, 10) || 0;
+  if (!$("#i-cutoff").value) $("#i-cutoff").value = firstOfMonth();
+  const cutoff = $("#i-cutoff").value;
+  const g = (r, k) => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
+  const rows = imp.rows.map(r => ({ r, listed: isoDay(g(r, "listed")) })).sort((a, b) => b.listed.localeCompare(a.listed));
+  const scan = recent ? rows.slice(0, recent) : rows;
+  const byPcs = new Map(S.listings.filter(l => l.pcsId).map(l => [l.pcsId, l]));
+  const byItem = new Map(S.listings.filter(l => l.item).map(l => [l.item, l]));
+  const used = new Set(S.listings.map(l => l.sku)), seen = new Set();
+  let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
+  const plan = scan.map(({ r, listed }) => {
+    const pcsId = g(r, "pcsId").replace(/\.0+$/, ""), title = g(r, "title");
+    const url = g(r, "url"), d = url ? detect(url) : null, item = g(r, "item").replace(/\D/g, "") || (d ? d.item : "");
+    if (!pcsId && !title && !item) return null;
+    const label = title || (pcsId ? `Card #${pcsId}` : `Item #${item}`);
+    const key = pcsId || (item ? "item:" + item : "");
+    if (!key) return { act: "skip", why: "No PC Sportscards card # or eBay item #", label };
+    if (seen.has(key)) return { act: "skip", why: "Same card twice in the file", label };
+    seen.add(key);
+    if (!title) return { act: "skip", why: "No card title", label };
+    const kind = m.status >= 0 ? pcsStatus(g(r, "status")) : "live";
+    if (!kind) return { act: "skip", why: `Status “${g(r, "status")}”`, label };
+    const paidDate = isoDay(g(r, "paidDate")), soldDate = isoDay(g(r, "soldDate")) || paidDate;
+    const price = money2(g(r, "price")), net = money2(g(r, "net"));
+    const status = kind === "received" ? "sold" : kind;
+    const ex = pcsId ? byPcs.get(pcsId) : byItem.get(item);
+    if (ex) {
+      // Never move a card backwards: paid-out stays paid out, and a sale isn't undone by an older row.
+      const rank = { curating: 0, live: 1, unsold: 1, sold: 2, paid: 3, returned: 3 };
+      const patch = {};
+      if (rank[status] > (rank[ex.status] ?? 0) || (ex.status === "live" && status === "unsold")) { patch.status = status; if (status === "sold" && !ex.soldDate) patch.soldDate = soldDate || now(); }
+      if (price && price !== ex.price) patch.price = price;
+      if ((status === "sold" || ex.status === "sold" || ex.status === "paid") && net && net !== ex.net) patch.net = net;
+      if (soldDate && !ex.soldDate && (status === "sold" || ex.status === "sold")) patch.soldDate = soldDate;
+      if (item && !ex.item) patch.item = item;
+      if (url && !ex.url) patch.url = url;
+      if (!Object.keys(patch).length) return { act: "skip", why: `No change (SKU ${ex.sku})`, label, same: true };
+      return { act: "update", target: ex, patch, label: ex.title, change: patch.status ? `${STAT[ex.status]} → ${STAT[patch.status]}` : patch.price ? `price ${money(patch.price)}` : "details" };
+    }
+    if (kind === "received" && paidDate && paidDate.slice(0, 10) < cutoff) return { act: "skip", why: "Paid before the cutoff (in an earlier monthly payout)", label, early: true };
+    while (used.has(pad6(next))) next++;
+    const sku = pad6(next++); used.add(sku);
+    const gm = title.match(/\b(PSA|SGC|BGS|CGC|TAG|HGA)\s*(\d+(?:\.\d)?|Authentic|Auth)\b/i);
+    const grade = g(r, "grade") ? normGrade(g(r, "grade")) : gm ? `${gm[1].toUpperCase()} ${gm[2]}` : "Ungraded";
+    const ends = isoDay(g(r, "ends"));
+    return { act: "new", auto: true, label: title, data: {
+      sku, cust: pick ? pick.cust : "", batch: pick ? pick.id : "", plat: "pcs", url: url || (item ? "https://www.ebay.com/itm/" + item : ""), item, title, grade, cert: g(r, "cert"),
+      format: "auction", price: price || null, ...(status === "sold" && net ? { net } : {}), ends, status, soldDate: status === "sold" ? soldDate || now() : "", ...(pcsId ? { pcsId } : {}), ...(listed ? { listed } : {}),
+    } };
+  }).filter(Boolean);
+  return plan;
+}
+function renderPcsImport() {
+  $("#i-batchwrap").hidden = false; $("#i-pcswrap").hidden = false;
+  $("#i-help").textContent = "Cards are matched by PC Sportscards’ card #, so re-uploading a newer export only adds new cards and updates sales. Sold cards use “Your Payout” (after PC Sportscards’ fees) with each consignor’s split.";
+  $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Status</th><th>Sale</th><th>Consignor</th></tr>";
+  if (!S.hist) { $("#i-sum").textContent = "Checking for cards already in the system…"; $("#i-prev").innerHTML = ""; $("#i-go").disabled = true; return; }
+  const plan = planPcs(), n = a => plan.filter(p => p.act === a).length;
+  const recent = parseInt($("#i-recent").value, 10) || 0;
+  const fresh = plan.filter(p => p.act === "new"), unassigned = fresh.filter(p => !p.data.cust).length;
+  const by = st => fresh.filter(p => p.data.status === st).length;
+  $("#i-sum").innerHTML = `Read the newest ${recent ? Math.min(recent, imp.rows.length).toLocaleString() : imp.rows.length.toLocaleString()} of ${imp.rows.length.toLocaleString()} rows · <span class="act-new">${fresh.length} new</span> (${by("live")} listed, ${by("sold")} sold, ${by("unsold")} unsold) · <span class="act-upd">${n("update")} updated</span> · ${plan.filter(p => p.same).length} unchanged · <span class="act-skip">${plan.filter(p => p.early).length} paid before the cutoff</span>${unassigned ? ` · <span class="need">${unassigned} will need a consignor</span>` : ""}`;
+  const order = { update: 0, new: 1, skip: 2 };
+  $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).slice(0, 12).map(p => {
+    const d = p.data, c = d ? custById(d.cust) : p.target ? custById(p.target.cust) : null;
+    const act = p.act === "new" ? `<span class="act-new">New · SKU ${d.sku}</span>` : p.act === "update" ? `<span class="act-upd">SKU ${esc(p.target.sku)}: ${esc(p.change)}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
+    const st = d ? STAT[d.status] : p.patch?.status ? STAT[p.patch.status] : "";
+    const sale = d && d.status === "sold" ? `${money(d.price)}<div class="cert">${money(d.net)} after fees</div>` : "";
+    return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td>${st}</td><td class="num">${sale}</td><td>${p.act === "skip" ? "" : c ? esc(c.name) : '<span class="need">Needs consignor</span>'}</td></tr>`;
+  }).join("") + (plan.length > 12 ? `<tr><td colspan="5" class="muted">…and ${(plan.length - 12).toLocaleString()} more rows</td></tr>` : "");
+  const go = fresh.length + n("update");
+  $("#i-go").disabled = !go;
+  $("#i-go").textContent = go ? `Add ${fresh.length} new` + (n("update") ? ` and update ${n("update")}` : "") : "Nothing new";
+}
 function renderFanImport() {
   $("#i-batchwrap").hidden = false;
   $("#i-help").textContent = "Only the link, cert #, card title and grade are read. Everything else in the export is ignored. Each row is matched to a card you already entered, by cert number first, then by exact title. CGC 0 means ungraded.";
@@ -1261,14 +1362,15 @@ function renderImport() {
   if (!$("#i-fields").contains(document.activeElement)) {
     $("#i-fields").innerHTML = fieldsFor(type).map(f => `<div class="f"><label for="map-${f.k}">${f.label}</label><select id="map-${f.k}" data-k="${f.k}"><option value="-1">Not in file</option>${imp.headers.map((h, i) => `<option value="${i}"${imp.map[f.k] === i ? " selected" : ""}>${esc(h)}</option>`).join("")}</select></div>`).join("");
   }
-  $("#i-optwrap").hidden = type !== "hist"; $("#i-limitwrap").hidden = type !== "hist";
+  if (document.activeElement !== $("#i-batch")) $("#i-batch").innerHTML = batchOptions($("#i-batch").value, '<option value="">No batch</option>');
+  $("#i-optwrap").hidden = type !== "hist"; $("#i-limitwrap").hidden = type !== "hist"; $("#i-pcswrap").hidden = type !== "pcs";
   if (type === "hist") return renderHistImport();
   if (type === "cust") return renderCustImport();
+  if (type === "pcs") return renderPcsImport();
   if (type === "fan") return renderFanImport();
   $("#i-batchwrap").hidden = false;
   $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.";
   $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr>";
-  if (document.activeElement !== $("#i-batch")) $("#i-batch").innerHTML = batchOptions($("#i-batch").value, '<option value="">No batch</option>');
   const plan = planImport(), n = a => plan.filter(p => p.act === a).length;
   const unassigned = plan.filter(p => p.act === "new" && !p.data.cust).length;
   $("#i-sum").innerHTML = `<span class="act-new">${n("new")} new</span> · <span class="act-upd">${n("update")} update cards already listed</span> · <span class="act-skip">${n("skip")} skipped</span>${unassigned ? ` · <span class="need">${unassigned} will need a consignor</span>` : ""}`;
@@ -1294,6 +1396,8 @@ $("#i-batch").addEventListener("change", e => { e.target.blur(); renderImport();
 $("#i-cancel").addEventListener("click", () => { closeImport(); $("#i-msg").textContent = ""; });
 $("#i-unpaid").addEventListener("change", () => renderImport());
 $("#i-limit").addEventListener("change", e => { e.target.blur(); renderImport(); });
+$("#i-recent").addEventListener("change", e => { e.target.blur(); renderImport(); });
+$("#i-cutoff").addEventListener("change", () => renderImport());
 $("#i-go").addEventListener("click", async () => {
   if (itype() === "hist") {
     await loadHistory();
@@ -1329,7 +1433,7 @@ $("#i-go").addEventListener("click", async () => {
     return;
   }
   await loadHistory();
-  const plan = itype() === "fan" ? planFan() : planImport();
+  const plan = itype() === "fan" ? planFan() : itype() === "pcs" ? planPcs() : planImport();
   const fresh = plan.filter(p => p.act === "new"), ups = plan.filter(p => p.act === "update");
   $("#i-go").disabled = true; $("#i-msg").textContent = "Importing…";
   const res = await guarded($("#i-msg"), async () => {

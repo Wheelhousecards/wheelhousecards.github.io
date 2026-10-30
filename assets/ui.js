@@ -17,7 +17,8 @@ export function payLine(c) {
   return PAYM[c.payMethod] + (c.payTo ? ` ${c.payTo}` : "");
 }
 // The consignor's share of one sale. Cards imported from the old system carry their exact portion.
-export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.price || 0) * (c?.rate ?? 85) / 100;
+// PC Sportscards cards carry their payout after PC Sportscards' fees (net); the consignor's split applies to that.
+export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.net != null ? l.net : (l.price || 0)) * (c?.rate ?? 85) / 100;
 // What Wheelhouse owes this consignor right now: sold-but-unpaid cards at their rate, plus any carried-over balance.
 export function owedFor(c, listings) {
   const sold = listings.filter(l => l.cust === c.id && l.status === "sold");
@@ -105,7 +106,8 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     ...(l.batch ? [["Batch", `<span class="code">${esc(l.batch)}</span>`]] : []),
     ...(l.added ? [["Added", fmtLong(l.added)]] : []),
     ...(l.status === "live" ? [[l.format === "bin" ? "Asking price" : "Current bid", money(l.price)], ...(l.format === "auction" && l.ends ? [["Ends", `${fmtLong(l.ends)} (${timeLeft(l.ends)})`]] : [])] : []),
-    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], [staff ? "Consignor portion" : "Your share", money(l.payout != null ? l.payout : (l.price || 0) * rate / 100) + (l.payout == null ? ` (at ${rate}%)` : "")]] : []),
+    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), [staff ? "Consignor portion" : "Your share", money(cardPayout(l, c)) + (l.payout == null ? ` (at ${rate}%)` : "")]] : []),
+    ...(l.pcsId ? [["PC Sportscards card #", `<span class="code">${esc(l.pcsId)}</span>`]] : []),
     ...(l.item ? [["eBay / listing #", `<span class="code">${esc(l.item)}</span>`]] : []),
     ...(l.url ? [["Listing", `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open on ${PLAT[l.plat] || "the site"}</a>`]] : []),
   ];
