@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105171839";
+import { db, logout } from "./firebase.js?v=20261105172747";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -8,10 +8,10 @@ import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
-  isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261105171839";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105171839";
-import { emailSend, contact } from "./firebase-config.js?v=20261105171839";
+  isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
+} from "./ui.js?v=20261105172747";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105172747";
+import { emailSend, contact } from "./firebase-config.js?v=20261105172747";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -315,7 +315,7 @@ function renderLedger() {
       <td class="title">${l.photo ? `<img src="${l.photo.thumb}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px">` : ""}${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
       <td>${isDropoff(l) ? "Auction" : `<select data-f="format" aria-label="Format for SKU ${esc(l.sku)}"><option value="auction"${l.format !== "bin" ? " selected" : ""}>Auction</option><option value="bin"${l.format === "bin" ? " selected" : ""}>Buy It Now</option></select>`}</td>
-      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${money(cardPayout(l, custById(l.cust)))} to consignor${l.payout == null && !isDropoff(l) ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
+      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${shareText(cardPayout(l, custById(l.cust)), true)} to consignor${l.payout == null && !isDropoff(l) && cardSplit(l, custById(l.cust)) != null ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
       <td class="num"><input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}</td>
       <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
@@ -483,7 +483,7 @@ function openDetail(id) {
       <div class="f"><label for="d-period">${l.plat === "pcs" ? "Payout month" : "Auction / period"}</label><input id="d-period" value="${v(l.period)}" placeholder="${l.plat === "pcs" ? "October 2026" : "WA180"}"></div>
       <div class="f"><label for="d-price">Price / sale</label><input id="d-price" type="number" step="0.01" min="0" value="${l.price ?? ""}"></div>
       <div class="f"><label for="d-payout">Consignor portion</label><input id="d-payout" type="number" step="0.01" min="0" value="${l.payout ?? ""}" placeholder="Uses their split"></div>
-      <div class="f"><label for="d-split">Split % for this card</label><input id="d-split" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="Auto: ${cardSplit({ ...l, split: null }, c)}%"></div>
+      <div class="f"><label for="d-split">Split % for this card</label><input id="d-split" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="${cardSplit({ ...l, split: null }, c) == null ? "Enter PC %" : `Auto: ${cardSplit({ ...l, split: null }, c)}%`}"></div>
       <div class="f"><label for="d-count">Cards in lot</label><input id="d-count" type="number" step="1" min="0" value="${l.lotCount ?? ""}" placeholder="1"></div>
       <div class="f w6"><label for="d-url">Listing link</label><input id="d-url" value="${v(l.url)}" placeholder="Paste the Fanatics Collect or eBay link"></div>
       <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="d-msg" role="status"></span></div></div>
@@ -513,6 +513,7 @@ function openDropDetail(l) {
       <div class="f w6"><h3>Edit</h3></div>
       <div class="f"><label for="dx-date">Dropped off</label><input id="dx-date" type="date" value="${v(l.dropDate)}"></div>
       <div class="f"><label for="dx-n">Cards dropped off</label><input id="dx-n" type="number" min="0" step="1" value="${l.expected || ""}"></div>
+      <div class="f"><label for="dx-pct">Customer’s % of PC payout</label><input id="dx-pct" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="Enter %"></div>
       <div class="f"><label for="dx-batch">PC batch</label><select id="dx-batch"><option value="">No batch</option>${pcsBatches(l.cust).map(b => `<option value="${b.id}"${b.id === l.batch ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join("")}</select></div>
       <div class="f w6"><label for="dx-cust">Customer</label><select id="dx-cust">${custOptions(l.cust)}</select></div>
       <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="dx-fmsg" role="status"></span></div></div>
@@ -523,7 +524,9 @@ detail.body.addEventListener("submit", async e => {
   e.preventDefault();
   const l = S.all.find(x => x.id === openCard); if (!l) return;
   const dropDate = $("#dx-date").value || l.dropDate, cust = $("#dx-cust").value;
-  const patch = { dropDate, expected: parseInt($("#dx-n").value, 10) || 0, batch: $("#dx-batch").value, title: `PC Sportscards drop-off · ${fmtDay(dropDate)}`, cust, custEmail: emailOf(cust) };
+  const pv = parseFloat($("#dx-pct").value);
+  if (!isNaN(pv) && (pv < 0 || pv > 100)) { $("#dx-fmsg").textContent = "The % must be between 0 and 100."; return; }
+  const patch = { split: isNaN(pv) ? null : pv, dropDate, expected: parseInt($("#dx-n").value, 10) || 0, batch: $("#dx-batch").value, title: `PC Sportscards drop-off · ${fmtDay(dropDate)}`, cust, custEmail: emailOf(cust) };
   const ok = await guarded($("#dx-fmsg"), async () => {
     const ops = [upd(l.id, patch)];
     if (cust !== l.cust) (l.photos || []).forEach(p => ops.push(["update", doc(db, "photos", p.id), { cust, custEmail: emailOf(cust) }]));
@@ -602,8 +605,8 @@ function renderProfile(c, cards) {
   const count = k => singles.filter(l => l.status === k).length;
   // Every sale, from single cards and from cards inside drop-off SKUs.
   const sales = [
-    ...singles.filter(l => l.status === "sold" || l.status === "paid").map(l => ({ date: l.soldDate || l.added, price: l.price || 0, share: cardPayout(l, c), paid: l.status === "paid", sku: l.sku, id: l.id, title: l.title })),
-    ...drops.flatMap(d => (d.items || []).filter(x => x.status === "sold" || x.status === "paid").map(x => ({ date: x.soldDate || d.dropDate, price: x.price || 0, share: itemShare(x, c), paid: x.status === "paid", sku: d.sku, id: d.id, title: x.title }))),
+    ...singles.filter(l => l.status === "sold" || l.status === "paid").map(l => ({ date: l.soldDate || l.added, price: l.price || 0, share: cardPayout(l, c) || 0, paid: l.status === "paid", sku: l.sku, id: l.id, title: l.title })),
+    ...drops.flatMap(d => (d.items || []).filter(x => x.status === "sold" || x.status === "paid").map(x => ({ date: x.soldDate || d.dropDate, price: x.price || 0, share: itemShare(x, c, d) || 0, paid: x.status === "paid", sku: d.sku, id: d.id, title: x.title }))),
   ];
   const lifetimeGross = sales.reduce((s, x) => s + x.price, 0), lifetimeShare = sales.reduce((s, x) => s + x.share, 0);
   const byMonth = new Map();
@@ -988,14 +991,14 @@ async function openReceipt(b) {
   });
 }
 function renderPayouts() {
-  const rows = S.customers.map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004).sort((a, b) => b.o.amount - a.o.amount);
+  const rows = S.customers.map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004 || x.o.needPct).sort((a, b) => b.o.amount - a.o.amount);
   $("#p-total").textContent = rows.length ? `${money(rows.reduce((s, x) => s + x.o.amount, 0))} owed to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
   $("#p-body").innerHTML = rows.length ? rows.map(({ c, o }) => {
     const canMail = !!c.email;
     return `<tr data-c="${c.id}">
       <td><span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button></td>
       <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}</td>
-      <td class="num">${o.count}</td>
+      <td class="num">${o.count}${o.needPct ? `<div class="flag">${o.needPct} PC sale${o.needPct === 1 ? "" : "s"} need a %</div>` : ""}</td>
       <td style="max-width:240px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>'}</td>
       <td class="num">${c.notifiedAt ? fmtDay(c.notifiedAt.slice(0, 10)) + (c.notifiedAmount != null && Math.abs(c.notifiedAmount - o.amount) > 0.004 ? `<div class="cert">was ${money(c.notifiedAmount)}</div>` : "") : '<span class="muted">Not yet</span>'}</td>
       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${canMail ? `<a class="btn ghost sm" data-pa="mail" href="#">Email</a><button class="btn ghost sm" type="button" data-pa="copy">Copy message</button>` : `<span class="muted" style="font-size:12px">No email on file</span>`}<button class="btn sm" type="button" data-pa="paid">${paidArm === c.id ? `Confirm ${money(o.amount)} paid` : "Mark paid"}</button></div></td>
@@ -1025,7 +1028,7 @@ $("#p-body").addEventListener("click", async e => {
       const ops = o.cards.map(l => upd(l.id, { status: "paid" }));
       const lots = new Map();
       o.dropItems.forEach(x => lots.set(x.lot.id, x.lot));
-      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => x.status === "sold" ? { ...x, status: "paid", paidOut: today() } : x)))));
+      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => x.status === "sold" && itemPct(x, l) != null ? { ...x, status: "paid", paidOut: today() } : x)))));
       ops.push(["update", doc(db, "customers", c.id), { payable: 0, payouts: [...(c.payouts || []), entry], notifiedAt: "", notifiedAmount: null }]);
       await commit(ops);
       msg.textContent = `Logged a ${money(entry.amount)} payout to ${c.name}. Their sold cards are now Paid out.`;

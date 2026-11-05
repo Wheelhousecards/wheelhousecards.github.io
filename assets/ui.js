@@ -27,7 +27,8 @@ export function payLine(c) {
    (from the old system) overrides both. */
 // Fixed splits for everyone (staff-only; customers never see a %). Fanatics Collect: 100% at $200 and up, 90% under $200.
 // A single card can still be given its own split from its detail view.
-export const SPLIT_DEFAULTS = { fanHi: 100, fanLo: 90, pcsRate: 95, rate: 100 };
+// PC Sportscards has no fixed split: staff enter the % on each drop-off (or card). Until then the share is "pending".
+export const SPLIT_DEFAULTS = { fanHi: 100, fanLo: 90, pcsRate: null, rate: 100 };
 export const splitOf = (c, k) => SPLIT_DEFAULTS[k];
 export const splitLine = () => "Fanatics Collect 100% at $200+, 90% under $200";
 export function cardSplit(l, c) {
@@ -36,7 +37,10 @@ export function cardSplit(l, c) {
   if (l.plat === "pcs") return splitOf(c, "pcsRate");
   return splitOf(c, "rate");
 }
-export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.net != null ? l.net : (l.price || 0)) * cardSplit(l, c) / 100;
+export const cardPayout = (l, c) => { if (l.payout != null) return l.payout; const p = cardSplit(l, c); return p == null ? null : (l.net != null ? l.net : (l.price || 0)) * p / 100; };
+const has = v => v != null && v !== "" && !isNaN(+v);
+// money for a share that may not be known yet
+export const shareText = (v, staff) => v == null ? (staff ? '<span class="need">Set PC %</span>' : '<span class="muted">Pending</span>') : money(v);
 /* ---------- PC Sportscards drop-offs ----------
    A drop-off is one SKU for one customer's drop-off. Its cards live in items[], each with its own
    PC Sportscards status: live, sold (PC Sportscards sold it, Wheelhouse hasn't paid the consignor yet),
@@ -60,7 +64,8 @@ export function ebayFind(x) {
   const p = done && x.price > 0 ? `&_udlo=${(x.price - 0.01).toFixed(2)}&_udhi=${(x.price + 0.01).toFixed(2)}` : "";
   return `https://www.ebay.com/sch/i.html?_nkw=${q}${PCS_SELLER ? `&_ssn=${encodeURIComponent(PCS_SELLER)}` : ""}${done ? "&LH_Sold=1&LH_Complete=1" : ""}${p}`;
 }
-export const itemShare = (x, c) => (x.net != null ? x.net : (x.price || 0)) * (x.split != null && x.split !== "" ? +x.split : splitOf(c, "pcsRate")) / 100;
+export const itemPct = (x, lot) => has(x.split) ? +x.split : has(lot?.split) ? +lot.split : null;
+export const itemShare = (x, c, lot) => { const p = itemPct(x, lot); return p == null ? null : (x.net != null ? x.net : (x.price || 0)) * p / 100; };
 export function dropoffSummary(items = []) {
   const n = k => items.filter(x => x.status === k).length;
   const soldItems = items.filter(x => x.status === "sold" || x.status === "paid");
@@ -72,10 +77,13 @@ export function dropoffSummary(items = []) {
 // What Wheelhouse owes this consignor right now: sold-but-unpaid cards at their rate, plus any carried-over balance.
 export function owedFor(c, listings) {
   const mine = listings.filter(l => l.cust === c.id);
-  const sold = mine.filter(l => l.status === "sold" && !isDropoff(l));
-  const dropItems = mine.filter(isDropoff).flatMap(l => (l.items || []).filter(x => x.status === "sold").map(x => ({ ...x, lot: l })));
-  return { cards: sold, dropItems, count: sold.length + dropItems.length,
-    amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + dropItems.reduce((s, x) => s + itemShare(x, c), 0) + (c?.payable || 0) };
+  const soldAll = mine.filter(l => l.status === "sold" && !isDropoff(l));
+  const itemsAll = mine.filter(isDropoff).flatMap(l => (l.items || []).filter(x => x.status === "sold").map(x => ({ ...x, lot: l })));
+  // Sales with no PC % yet aren't counted until staff set one.
+  const sold = soldAll.filter(l => cardPayout(l, c) != null), dropItems = itemsAll.filter(x => itemPct(x, x.lot) != null);
+  const needPct = soldAll.length - sold.length + itemsAll.length - dropItems.length;
+  return { cards: sold, dropItems, count: sold.length + dropItems.length, needPct,
+    amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + dropItems.reduce((s, x) => s + itemShare(x, c, x.lot), 0) + (c?.payable || 0) };
 }
 
 export function detect(url) {
@@ -164,7 +172,7 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     ...(l.batch ? [["Batch", `<span class="code">${esc(l.batch)}</span>`]] : []),
     ...(l.added ? [["Added", fmtLong(l.added)]] : []),
     ...(l.status === "live" ? [[l.format === "bin" ? "Asking price" : "Current bid", money(l.price)]] : []),
-    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), [staff ? "Consignor portion" : "Your share", money(cardPayout(l, c)) + (staff && l.payout == null ? ` (${cardSplit(l, c)}%${l.split != null && l.split !== "" ? ", set for this card" : ""})` : "")]] : []),
+    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), [staff ? "Consignor portion" : "Your share", shareText(cardPayout(l, c), staff) + (staff && l.payout == null && cardSplit(l, c) != null ? ` (${cardSplit(l, c)}%${l.split != null && l.split !== "" ? ", set for this card" : ""})` : "")]] : []),
     ...(l.pcsId ? [["PC Sportscards card #", `<span class="code">${esc(l.pcsId)}</span>`]] : []),
     ...(l.item ? [["eBay / listing #", `<span class="code">${esc(l.item)}</span>`]] : []),
     ...(l.url ? [["Listing", `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open on ${PLAT[l.plat] || "the site"}</a>`]] : []),
@@ -175,7 +183,7 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     const ST = staff ? ITEM_STAT : CUST_ITEM_STAT;
     const head = `Cards in this drop-off (${sm.cards}${l.expected && l.expected !== sm.cards ? ` of ${l.expected} dropped off` : ""})`;
     lot = `<div style="display:grid;gap:8px"><h3>${head}</h3>` + (items.length
-      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${x.pcsId ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status === "awaiting" ? "sold" : x.status === "cancelled" ? "unsold" : x.status}">${ST[x.status] || esc(x.status)}</span>${staff && x.status === "awaiting" ? '<div class="flag">Waiting on buyer payment</div>' : ""}${staff && x.status === "cancelled" ? `<div class="flag">${x.relistedAs ? `Relisted as PC #${esc(x.relistedAs)}` : "Watch for the relist"}</div>` : ""}${staff && x.relistOf ? `<div class="cert">Relist of PC #${esc(x.relistOf)}</div>` : ""}</td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price && (staff || x.status !== "cancelled") ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? money(itemShare(x, c)) : x.status === "awaiting" ? '<span class="muted">Pending</span>' : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold${sm.awaiting ? ` · ${sm.awaiting} pending` : ""}</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
+      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${x.pcsId ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status === "awaiting" ? "sold" : x.status === "cancelled" ? "unsold" : x.status}">${ST[x.status] || esc(x.status)}</span>${staff && x.status === "awaiting" ? '<div class="flag">Waiting on buyer payment</div>' : ""}${staff && x.status === "cancelled" ? `<div class="flag">${x.relistedAs ? `Relisted as PC #${esc(x.relistedAs)}` : "Watch for the relist"}</div>` : ""}${staff && x.relistOf ? `<div class="cert">Relist of PC #${esc(x.relistOf)}</div>` : ""}</td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price && (staff || x.status !== "cancelled") ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? shareText(itemShare(x, c, l), staff) : x.status === "awaiting" ? '<span class="muted">Pending</span>' : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold${sm.awaiting ? ` · ${sm.awaiting} pending` : ""}</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
       : `<div class="empty" style="padding:16px">${staff ? "No cards in this drop-off yet. Select them in the PC Sportscards sorting list and add them here." : "We’re itemizing the cards from this drop-off. They’ll show up here once PC Sportscards lists them."}</div>`) + `</div>`;
   } else if (isLot(l)) {
     const items = l.items || [];
@@ -377,16 +385,16 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
       const tl = l.format === "auction" && l.status === "live" ? timeLeft(l.ends) : "";
       let label, sub, recv = null, sub2 = "";
       if (isDropoff(l)) {
-        const sm = dropoffSummary(l.items), share = (l.items || []).filter(x => x.status === "sold" || x.status === "paid").reduce((t, x) => t + itemShare(x, c), 0);
+        const sm = dropoffSummary(l.items), soldIt = (l.items || []).filter(x => x.status === "sold" || x.status === "paid"), share = soldIt.some(x => itemPct(x, l) == null) ? null : soldIt.reduce((t, x) => t + itemShare(x, c, l), 0);
         label = sm.sold + sm.paid ? "Sold so far" : "PC Sportscards";
         if (staff && (sm.awaiting || sm.relisting)) sub2 = [sm.awaiting ? `${sm.awaiting} awaiting payment` : "", sm.relisting ? `${sm.relisting} to be relisted` : ""].filter(Boolean).join(" · ");
-        sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `${gets} ${money(share)}` : sm.awaiting ? `${sm.awaiting} sold, payment pending` : `${sm.live + sm.relisting} listed on eBay`;
-        if (sm.sold + sm.paid) recv = share;
+        sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `${gets} ${share == null ? "pending" : money(share)}` : sm.awaiting ? `${sm.awaiting} sold, payment pending` : `${sm.live + sm.relisting} listed on eBay`;
+        if (sm.sold + sm.paid) recv = share ?? "pending";
         l = { ...l, price: sm.sold + sm.paid ? sm.gross : null };
       }
       else if (l.status === "live") { label = l.format === "bin" ? "Asking" : "Current bid"; sub = l.format === "bin" ? "Buy It Now" : l.period ? `Auction ${esc(l.period)}` : "Auction"; }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
-      else if (isSold(l)) { label = "Sold for"; recv = cardPayout(l, c); sub = staff && l.payout == null ? `${cardSplit(l, c)}% split` + (l.status === "paid" ? " · paid" : "") : l.status === "paid" ? "Paid out" : ""; }
+      else if (isSold(l)) { label = "Sold for"; recv = cardPayout(l, c) ?? "pending"; sub = staff && l.payout == null && cardSplit(l, c) != null ? `${cardSplit(l, c)}% split` + (l.status === "paid" ? " · paid" : "") : l.status === "paid" ? "Paid out" : ""; }
       else if (l.status === "returned") { label = "Returned to you"; sub = ""; }
       else { label = "Did not sell"; sub = "Ask us about relisting"; }
       return `<article class="card">
@@ -395,7 +403,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
           <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
         </div></div>
         <div class="right">${recv != null
-          ? `<span class="sub">${gets}</span><span class="amt recv">${money(recv)}</span><span class="soldfor">${isDropoff(l) ? "Sold so far" : "Sold for"} ${money(l.price)}</span>`
+          ? `<span class="sub">${gets}</span><span class="amt recv">${recv === "pending" ? (staff ? '<span class="need" style="font-size:16px">Set PC %</span>' : '<span class="muted" style="font-size:16px">Pending</span>') : money(recv)}</span><span class="soldfor">${isDropoff(l) ? "Sold so far" : "Sold for"} ${money(l.price)}</span>`
           : `<span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>`}<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}</div>
       </article>`;
     }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
