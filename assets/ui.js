@@ -18,14 +18,27 @@ export function payLine(c) {
 }
 // The consignor's share of one sale. Cards imported from the old system carry their exact portion.
 // PC Sportscards cards carry their payout after PC Sportscards' fees (net); the consignor's split applies to that.
-export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.net != null ? l.net : (l.price || 0)) * (c?.rate ?? 85) / 100;
+/* Payout splits, per card:
+   - Fanatics Collect: 100% when the card sells for $200 or more, 90% under $200.
+   - PC Sportscards: a flat 95% of what PC Sportscards pays after its fees.
+   - Anything else: the consignor's default split.
+   A card's own split (set in its details) overrides the rule, and an exact consignor portion
+   (from the old system) overrides both. */
+export const SPLIT_RULES = "Fanatics Collect: 100% at $200 and up, 90% under $200 · PC Sportscards: 95%";
+export function cardSplit(l, c) {
+  if (l.split != null && l.split !== "") return +l.split;
+  if (l.plat === "fan") return (l.price || 0) >= 200 ? 100 : 90;
+  if (l.plat === "pcs") return 95;
+  return c?.rate ?? 85;
+}
+export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.net != null ? l.net : (l.price || 0)) * cardSplit(l, c) / 100;
 /* ---------- PC Sportscards drop-offs ----------
    A drop-off is one SKU for one customer's drop-off. Its cards live in items[], each with its own
    PC Sportscards status: live, sold (PC Sportscards sold it, Wheelhouse hasn't paid the consignor yet),
    paid (paid out to the consignor) or unsold. */
 export const isDropoff = l => !!(l && l.kind === "dropoff");
 export const ITEM_STAT = { live: "Listed", sold: "Sold", paid: "Paid out", unsold: "Unsold" };
-export const itemShare = (x, c) => (x.net != null ? x.net : (x.price || 0)) * (c?.rate ?? 85) / 100;
+export const itemShare = (x, c) => (x.net != null ? x.net : (x.price || 0)) * (x.split ?? 95) / 100;
 export function dropoffSummary(items = []) {
   const n = k => items.filter(x => x.status === k).length;
   const soldItems = items.filter(x => x.status === "sold" || x.status === "paid");
@@ -125,8 +138,8 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     ...(staff && c ? [["Consignor", `<span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${esc(c.id)}">${esc(c.name)}</button>`]] : []),
     ...(l.batch ? [["Batch", `<span class="code">${esc(l.batch)}</span>`]] : []),
     ...(l.added ? [["Added", fmtLong(l.added)]] : []),
-    ...(l.status === "live" ? [[l.format === "bin" ? "Asking price" : "Current bid", money(l.price)], ...(l.format === "auction" && l.ends ? [["Ends", `${fmtLong(l.ends)} (${timeLeft(l.ends)})`]] : [])] : []),
-    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), [staff ? "Consignor portion" : "Your share", money(cardPayout(l, c)) + (l.payout == null ? ` (at ${rate}%)` : "")]] : []),
+    ...(l.status === "live" ? [[l.format === "bin" ? "Asking price" : "Current bid", money(l.price)]] : []),
+    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), [staff ? "Consignor portion" : "Your share", money(cardPayout(l, c)) + (l.payout == null ? ` (${cardSplit(l, c)}%${l.split != null && l.split !== "" ? ", set for this card" : ""})` : "")]] : []),
     ...(l.pcsId ? [["PC Sportscards card #", `<span class="code">${esc(l.pcsId)}</span>`]] : []),
     ...(l.item ? [["eBay / listing #", `<span class="code">${esc(l.item)}</span>`]] : []),
     ...(l.url ? [["Listing", `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open on ${PLAT[l.plat] || "the site"}</a>`]] : []),
@@ -288,7 +301,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto } = {}) {
       ["Live now", live.length, `${live.filter(l => l.plat === "fan").length} Fanatics · ${live.filter(l => l.plat === "pcs").length} PC Sportscards`],
       ["Current value", money(liveVal), "Asking prices plus current bids"],
       ["Sold, last 30 days", sold30.length, money(sold30.reduce((s, l) => s + (l.price || 0), 0)) + " gross"],
-      ["Payout pending", money(owed), `At your ${c.rate ?? 85}% rate` + (c.payable ? ` · includes ${money(c.payable)} carried over` : "") + (lastPaid ? ` · last paid ${money(lastPaid.amount)} on ${fmtDay(lastPaid.date)}` : "") + (ending ? ` · ${ending} ending today` : "")],
+      ["Payout pending", money(owed), `Fanatics 100% at $200+, 90% under · PC Sportscards 95%` + (c.payable ? ` · includes ${money(c.payable)} carried over` : "") + (lastPaid ? ` · last paid ${money(lastPaid.amount)} on ${fmtDay(lastPaid.date)}` : "") + (ending ? ` · ${ending} ending today` : "")],
     ].map(([k, v, s]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${s}</span></div>`).join("");
 
     const fp = q("plat").value;
@@ -340,9 +353,9 @@ export function mountDashboard(root, pickerHtml, { loadPhoto } = {}) {
         sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `You receive ${money(share)}` : `${sm.live} listed on eBay`;
         l = { ...l, price: sm.sold + sm.paid ? sm.gross : null };
       }
-      else if (l.status === "live") { label = l.format === "bin" ? "Asking" : "Current bid"; sub = l.format === "bin" ? "Buy It Now" : (tl ? `<span class="${endsSoon(l) ? "soon" : ""}">Ends in ${tl}</span>` : "Auction"); }
+      else if (l.status === "live") { label = l.format === "bin" ? "Asking" : "Current bid"; sub = l.format === "bin" ? "Buy It Now" : l.period ? `Auction ${esc(l.period)}` : "Auction"; }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
-      else if (isSold(l)) { label = "Sold for"; sub = `You receive ${money(cardPayout(l, c))}` + (l.status === "paid" ? " · paid" : ""); }
+      else if (isSold(l)) { label = "Sold for"; sub = `You receive ${money(cardPayout(l, c))}${l.payout == null ? ` (${cardSplit(l, c)}%)` : ""}` + (l.status === "paid" ? " · paid" : ""); }
       else if (l.status === "returned") { label = "Returned to you"; sub = ""; }
       else { label = "Did not sell"; sub = "Ask us about relisting"; }
       return `<article class="card">

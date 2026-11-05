@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105121339";
+import { db, logout } from "./firebase.js?v=20261105121951";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -8,9 +8,9 @@ import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
-  isDropoff, ITEM_STAT, dropoffSummary, itemShare
-} from "./ui.js?v=20261105121339";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105121339";
+  isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, SPLIT_RULES
+} from "./ui.js?v=20261105121951";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105121951";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -256,7 +256,7 @@ function renderLedger() {
   $("#bb-del").hidden = view === "removed"; $("#bb-restore").hidden = view !== "removed"; $("#bb-purge").hidden = view !== "removed";
   $("#count").textContent = loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
   $("#th-price").textContent = view === "paid" ? "Sale / to consignor" : "Price / bid";
-  $("#th-when").textContent = view === "paid" ? "Sold" : view === "returned" ? "Added" : "Ends";
+  $("#th-when").textContent = view === "paid" ? "Sold" : view === "returned" ? "Added" : "Auction # / date";
   ui.visible = rows.map(l => l.id);
   const custSel = [...S.customers].sort(byName).map(x => `<option value="${x.id}">${esc(x.name)} · ${esc(x.code)}</option>`).join("");
   const shown = rows.slice(0, 500);
@@ -270,8 +270,8 @@ function renderLedger() {
       <td class="title">${l.photo ? `<img src="${l.photo.thumb}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px">` : ""}${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
       <td>${l.format === "bin" ? "Buy It Now" : "Auction"}</td>
-      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${money(cardPayout(l, custById(l.cust)))} to consignor</div>` : ""}</td>
-      <td class="num">${l.status === "live" && l.format === "auction" ? esc(timeLeft(l.ends)) : PAST.includes(l.status) || l.status === "sold" ? esc(fmtDay((l.soldDate || l.added || "").slice(0, 10))) : ""}</td>
+      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${money(cardPayout(l, custById(l.cust)))} to consignor${l.payout == null && !isDropoff(l) ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
+      <td class="num">${l.status === "live" || l.status === "curating" ? `<span class="code">${esc(l.period || "")}</span>` : PAST.includes(l.status) || l.status === "sold" ? esc(fmtDay((l.soldDate || l.added || "").slice(0, 10))) : ""}</td>
       <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
       <td><button class="x" type="button" data-del aria-label="Remove SKU ${esc(l.sku)}">${delOne === l.id ? "Sure?" : "×"}</button></td></tr>`;
@@ -328,13 +328,13 @@ $("#addForm").addEventListener("submit", async e => {
   await guarded($("#detect"), async () => {
     const sku = manual ? typed : pad6(await reserve("sku", 1, maxSku()));
     if (manual) await bump("sku", parseInt(sku, 10));
-    const ends = $("#a-ends").value, p = parseFloat($("#a-price").value);
+    const period = $("#a-auction").value.trim().toUpperCase(), p = parseFloat($("#a-price").value);
     await setDoc(doc(col("listings")), {
       sku, cust, custEmail: emailOf(cust), batch: $("#a-batch").value || "", plat, url, item: d ? d.item : "", title, grade, cert,
-      format: $("#a-format").value, price: isNaN(p) ? null : p, ends: ends ? new Date(ends).toISOString() : "",
+      format: $("#a-format").value, price: isNaN(p) ? null : p, ends: "", ...(period ? { period } : {}),
       status: url ? "live" : "curating", soldDate: "", added: now(), addedBy: me, updatedAt: serverTimestamp()
     });
-    ["#a-url", "#a-title", "#a-grade", "#a-cert", "#a-price", "#a-ends"].forEach(s => { $(s).value = ""; });
+    ["#a-url", "#a-title", "#a-grade", "#a-cert", "#a-price"].forEach(s => { $(s).value = ""; });
     delete $("#a-sku").dataset.manual;
     say(`Added as SKU ${sku}. It shows on ${custById(cust).name}’s page as ${url ? "Live" : "Being curated"}.`);
   });
@@ -437,6 +437,7 @@ function openDetail(id) {
       <div class="f"><label for="d-period">${l.plat === "pcs" ? "Payout month" : "Auction / period"}</label><input id="d-period" value="${v(l.period)}" placeholder="${l.plat === "pcs" ? "October 2026" : "WA180"}"></div>
       <div class="f"><label for="d-price">Price / sale</label><input id="d-price" type="number" step="0.01" min="0" value="${l.price ?? ""}"></div>
       <div class="f"><label for="d-payout">Consignor portion</label><input id="d-payout" type="number" step="0.01" min="0" value="${l.payout ?? ""}" placeholder="Uses their split"></div>
+      <div class="f"><label for="d-split">Split % for this card</label><input id="d-split" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="Auto: ${cardSplit({ ...l, split: null }, c)}%"></div>
       <div class="f"><label for="d-count">Cards in lot</label><input id="d-count" type="number" step="1" min="0" value="${l.lotCount ?? ""}" placeholder="1"></div>
       <div class="f w6"><label for="d-url">Listing link</label><input id="d-url" value="${v(l.url)}" placeholder="Paste the Fanatics Collect or eBay link"></div>
       <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="d-msg" role="status"></span></div></div>
@@ -586,7 +587,7 @@ function renderProfile(c, cards) {
         ${row("Inventory type", esc(c.invType || ""))}
       </dl></div>
       <div style="display:grid;gap:8px"><h3>Payouts</h3><dl class="dl">
-        ${row("Split", `${c.rate ?? 85}% to the consignor`)}
+        ${row("Splits", `${esc(SPLIT_RULES)} · other auction houses ${c.rate ?? 85}%`)}
         ${row("Paid by", payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>')}
         ${row("Mailing address", esc(c.mailing || ""))}
         ${row("Payout emails", c.notify === false ? "Off" : "On")}
@@ -627,7 +628,7 @@ detail.body.addEventListener("submit", async e => {
   if (url && !d) { $("#d-msg").textContent = "That link isn’t from Fanatics Collect or eBay."; return; }
   const title = $("#d-title").value.trim(); if (!title) { $("#d-msg").textContent = "Enter the card name."; return; }
   const cnt = parseInt($("#d-count").value, 10);
-  const patch = { title, grade: normGrade($("#d-grade").value), cert: $("#d-cert").value.trim(), period: $("#d-period").value.trim(), price: num("#d-price"), payout: num("#d-payout"), lotCount: isNaN(cnt) ? null : cnt, url, item: d ? d.item : (url ? l.item : "") };
+  const patch = { title, grade: normGrade($("#d-grade").value), cert: $("#d-cert").value.trim(), period: $("#d-period").value.trim(), price: num("#d-price"), payout: num("#d-payout"), split: num("#d-split"), lotCount: isNaN(cnt) ? null : cnt, url, item: d ? d.item : (url ? l.item : "") };
   if (d) patch.plat = d.plat;
   if (url && l.status === "curating") patch.status = "live";
   const ok = await guarded($("#d-msg"), async () => { await updateDoc(listingRef(l.id), { ...patch, updatedAt: serverTimestamp() }); return true; });
@@ -1204,7 +1205,7 @@ const FIELDS = [
   { k: "grade", label: "Grade", re: /grade/i },
   { k: "cert", label: "Cert #", re: /cert|serial/i },
   { k: "price", label: "Price / current bid", re: /price|bid|amount|sold.?for|current|value/i },
-  { k: "ends", label: "Auction ends", re: /end|clos/i },
+  { k: "period", label: "Auction #", re: /auction ?(#|no|num)|^auction$/i },
   { k: "format", label: "Format", re: /format|listing.?type|^type$/i, only: "full" },
   { k: "status", label: "Status", re: /status|state/i },
   { k: "sku", label: "SKU", re: /sku/i },
@@ -1308,7 +1309,6 @@ const PFIELDS = [
   { k: "cert", label: "Cert # (optional)", re: /cert/i },
   { k: "item", label: "eBay item # (optional)", re: /item.?(#|id|no|num)|ebay.?(#|id|item)/i },
   { k: "url", label: "Link (optional)", re: /url|link/i },
-  { k: "ends", label: "Auction ends (optional)", re: /^end|ends|closing/i },
 ];
 const FLISTS = { cust: CFIELDS, fan: FFIELDS, hist: HFIELDS, pcs: PFIELDS };
 const fieldsFor = type => FLISTS[type] || FIELDS.filter(f => !f.only || f.only === type);
@@ -1366,7 +1366,7 @@ function planImport() {
     if (item) { if (seen.has(item)) return { act: "skip", why: "Same item # is in the file twice", label }; seen.add(item); }
     const grade = normGrade(g("grade")), cert = g("cert");
     const pr = g("price").replace(/[^0-9.]/g, ""), price = pr ? parseFloat(pr) : null;
-    const et = g("ends") ? Date.parse(g("ends")) : NaN, ends = isNaN(et) ? "" : new Date(et).toISOString();
+    const period = g("period").toUpperCase(), ends = "";
     const sv = g("status").toLowerCase();
     const status = !sv ? "" : /unsold|not sold|no sale|return/.test(sv) ? "unsold" : /paid/.test(sv) ? "paid" : /sold/.test(sv) ? "sold" : "live";
     const fv = g("format").toLowerCase();
@@ -1381,13 +1381,13 @@ function planImport() {
     if (!cust && bt) { cust = bt.cust; warn = ""; }
     const ex = item && byItem.get(item);
     if (ex && ex.status === "removed") return { act: "skip", why: `Removed earlier (SKU ${ex.sku}). Restore it from the Removed tab to bring it back.`, label };
-    if (ex) return { act: "update", label: title, target: ex, price, ends, status, cust, batch: bt ? bt.id : "", warn: "" };
+    if (ex) return { act: "update", label: title, target: ex, price, period, status, cust, batch: bt ? bt.id : "", warn: "" };
     let sku = g("sku").replace(/\D/g, ""), auto = false;
     sku = sku && sku.length <= 6 ? pad6(sku) : "";
     if (!sku || used.has(sku)) { while (used.has(pad6(next))) next++; sku = pad6(next++); auto = true; }
     used.add(sku);
     if (grade !== "Ungraded" && !cert) warn = warn || "Graded, but no cert #";
-    return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends, status: status || (url ? "live" : "curating"), soldDate: (status === "sold" || status === "paid") ? now() : "" } };
+    return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends, ...(period ? { period } : {}), status: status || (url ? "live" : "curating"), soldDate: (status === "sold" || status === "paid") ? now() : "" } };
   }).filter(Boolean);
 }
 function planCust() {
@@ -1847,7 +1847,7 @@ $("#i-go").addEventListener("click", async () => {
       if (p.patch) { keep(p.target, p.patch); ops.push(upd(p.target.id, p.patch)); return; }
       const t = p.target, data = {};
       if (p.price != null) data.price = p.price;
-      if (p.ends) data.ends = p.ends;
+      if (p.period) data.period = p.period;
       if (p.status) { data.status = p.status; if ((p.status === "sold" || p.status === "paid") && !t.soldDate) data.soldDate = now(); }
       if (p.cust) { data.cust = p.cust; data.custEmail = emailOf(p.cust); }
       if (p.batch) data.batch = p.batch;
