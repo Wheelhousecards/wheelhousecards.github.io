@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105165350";
+import { db, logout } from "./firebase.js?v=20261105165949";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261105165350";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105165350";
-import { emailSend, contact } from "./firebase-config.js?v=20261105165350";
+} from "./ui.js?v=20261105165949";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105165949";
+import { emailSend, contact } from "./firebase-config.js?v=20261105165949";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -198,6 +198,33 @@ createLightbox(id => {
 
 /* ---------- staff render ---------- */
 const byName = (a, b) => a.name.localeCompare(b.name);
+// Type-to-search for a consignor <select>: a text box with suggestions sits in its place and drives the hidden select.
+function searchable(sel, placeholder) {
+  const sl = $(sel), id = sl.id + "-q", list = sl.id + "-list";
+  const box = document.createElement("input");
+  Object.assign(box, { id, type: "search", placeholder, autocomplete: "off", spellcheck: false });
+  box.setAttribute("list", list); box.setAttribute("aria-label", sl.getAttribute("aria-label") + " (type to search)"); box.className = "csearch";
+  const dl = document.createElement("datalist"); dl.id = list;
+  sl.hidden = true; sl.after(box, dl);
+  const pick = final => {
+    const t = box.value.trim().toLowerCase(), opts = [...sl.options].filter(o => o.value);
+    let o = !t ? null : opts.find(x => x.text.toLowerCase() === t);
+    if (!o && t && final) { const m = opts.filter(x => x.text.toLowerCase().includes(t)); if (m.length === 1) o = m[0]; }
+    const v = !t ? "" : o ? o.value : null;
+    if (v === null || v === sl.value) return;
+    sl.value = v; if (o && final) box.value = o.text;
+    sl.dispatchEvent(new Event("input", { bubbles: true })); sl.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  box.addEventListener("input", () => pick(false));
+  box.addEventListener("change", () => pick(true));
+  box.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); pick(true); } });
+  return () => { // call after the select's options change
+    dl.innerHTML = [...sl.options].filter(o => o.value).map(o => `<option value="${esc(o.text)}"></option>`).join("");
+    const cur = sl.selectedOptions[0];
+    if (document.activeElement !== box) box.value = cur && cur.value ? cur.text : "";
+  };
+}
+let syncFCust = () => {}, syncBfCust = () => {};
 function custOptions(sel, withAll) {
   return (withAll ? '<option value="">All consignors</option>' : "") + [...S.customers].sort(byName).map(c => `<option value="${c.id}"${c.id === sel ? " selected" : ""}>${esc(c.name)} · ${esc(c.code)}</option>`).join("");
 }
@@ -237,6 +264,8 @@ function renderLedger() {
   delete tb.dataset.stale;
   const fc = $("#f-cust").value;
   $("#f-cust").innerHTML = custOptions(fc, true).replace("</option>", `</option><option value="__none"${fc === "__none" ? " selected" : ""}>Needs consignor</option>`);
+  if (fc && $("#f-cust").value !== fc) $("#f-cust").value = fc;
+  syncFCust();
   const fb = $("#f-batch").value;
   $("#f-batch").innerHTML = batchOptions(fb, `<option value="">All batches</option><option value="__nob"${fb === "__nob" ? " selected" : ""}>Not in a batch</option>`);
   const q = $("#f-q").value.trim().toLowerCase(), fp = $("#f-plat").value, fs = $("#f-st").value;
@@ -297,6 +326,7 @@ function renderLedger() {
 }
 $("#tbody").addEventListener("focusout", () => setTimeout(() => { if ($("#tbody").dataset.stale && !$("#tbody").contains(document.activeElement)) renderLedger(); }, 0));
 ["#f-q", "#f-cust", "#f-plat", "#f-st", "#f-batch", "#f-added"].forEach(s => $(s).addEventListener("input", renderLedger));
+syncFCust = searchable("#f-cust", "All consignors · type to search");
 function setView(v) {
   ui.view = v; ui.sel.clear();
   [...$("#views").children].forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v));
@@ -1147,7 +1177,7 @@ let editingBatch = "", pending = [], bDelArm = "";
 function renderBatches() {
   const pc = $("#b-cust").value;
   $("#b-cust").innerHTML = '<option value="">Choose…</option>' + custOptions(pc);
-  const bc = $("#bf-cust").value; $("#bf-cust").innerHTML = custOptions(bc, true);
+  const bc = $("#bf-cust").value; $("#bf-cust").innerHTML = custOptions(bc, true); syncBfCust();
   if (!$("#b-recv").value && !editingBatch) $("#b-recv").value = today();
   const sort = $("#bf-sort").value, nm = b => custById(b.cust)?.name || "~";
   const byBatch = new Map();
@@ -1262,6 +1292,7 @@ $("#bForm").addEventListener("submit", async e => {
 });
 $("#b-cancel").addEventListener("click", () => { resetBatchForm(); $("#b-msg").textContent = ""; });
 $("#bf-cust").addEventListener("change", renderBatches);
+syncBfCust = searchable("#bf-cust", "All customers · type to search");
 $("#bf-sort").addEventListener("change", renderBatches);
 $("#b-body").addEventListener("click", async e => {
   const a = e.target.dataset.ba; if (!a) return;
