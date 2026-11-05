@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105130237";
+import { db, logout } from "./firebase.js?v=20261105131741";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,8 +9,8 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, SPLIT_RULES
-} from "./ui.js?v=20261105130237";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105130237";
+} from "./ui.js?v=20261105131741";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105131741";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1383,12 +1383,13 @@ function planImport() {
     let url = g("url"), item = g("item").replace(/\D/g, ""); const d = detect(url);
     if (!item && d) item = d.item;
     const pv = g("plat");
-    const plat = type === "pcs" ? "pcs" : d ? d.plat : pv ? (/ebay/i.test(pv) ? "pcs" : platFromShelf(pv)) : "";
+    const rowBt = pick || (g("batch") && batchById(g("batch").toUpperCase())) || null;
+    const plat = type === "pcs" ? "pcs" : d ? d.plat : pv ? (/ebay/i.test(pv) ? "pcs" : platFromShelf(pv)) : type === "full" ? (rowBt && rowBt.plat) || $("#i-plat").value : "";
     if (!url && item && plat === "pcs") url = "https://www.ebay.com/itm/" + item;
     const title = g("title");
     if (!title && !item && !url) return null;
     const label = title || item || url;
-    if (!plat) return { act: "skip", why: type === "full" ? "No link or auction house" : "No Fanatics or eBay link", label };
+    if (!plat) return { act: "skip", why: type === "full" ? "Choose the auction house above" : "No Fanatics or eBay link", label };
     if (!url && type !== "full") return { act: "skip", why: "No link or eBay item #", label };
     if (!title) return { act: "skip", why: "No card title", label };
     if (item) { if (seen.has(item)) return { act: "skip", why: "Same item # is in the file twice", label }; seen.add(item); }
@@ -1748,12 +1749,12 @@ function renderImport() {
     $("#i-fields").innerHTML = fieldsFor(type).map(f => `<div class="f"><label for="map-${f.k}">${f.label}</label><select id="map-${f.k}" data-k="${f.k}"><option value="-1">Not in file</option>${imp.headers.map((h, i) => `<option value="${i}"${imp.map[f.k] === i ? " selected" : ""}>${esc(h)}</option>`).join("")}</select></div>`).join("");
   }
   if (document.activeElement !== $("#i-batch")) $("#i-batch").innerHTML = batchOptions($("#i-batch").value, '<option value="">No batch</option>');
-  $("#i-optwrap").hidden = type !== "hist"; $("#i-limitwrap").hidden = type !== "hist"; $("#i-pcswrap").hidden = type !== "pcs";
+  $("#i-platwrap").hidden = true; $("#i-optwrap").hidden = type !== "hist"; $("#i-limitwrap").hidden = type !== "hist"; $("#i-pcswrap").hidden = type !== "pcs";
   if (type === "hist") return renderHistImport();
   if (type === "cust") return renderCustImport();
   if (type === "pcs") return renderPcsImport();
   if (type === "fan") return renderFanImport();
-  $("#i-batchwrap").hidden = false;
+  $("#i-batchwrap").hidden = false; $("#i-platwrap").hidden = false;
   $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.";
   $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr>";
   const plan = planImport(), n = a => plan.filter(p => p.act === a).length;
@@ -1778,6 +1779,7 @@ drop.addEventListener("drop", e => { e.preventDefault(); readFile(e.dataTransfer
 document.querySelectorAll('input[name="itype"]').forEach(r => r.addEventListener("change", () => { if (imp) { imp.map = guessMap(imp.headers, itype()); if (itype() !== "cust") loadHistory().then(() => renderImport()); renderImport(); } }));
 $("#i-fields").addEventListener("change", e => { const k = e.target.dataset.k; if (k) { imp.map[k] = parseInt(e.target.value, 10); e.target.blur(); renderImport(); } });
 $("#i-batch").addEventListener("change", e => { e.target.blur(); renderImport(); });
+$("#i-plat").addEventListener("change", e => { e.target.blur(); renderImport(); });
 $("#i-cancel").addEventListener("click", () => { closeImport(); $("#i-msg").textContent = ""; });
 $("#i-unpaid").addEventListener("change", () => renderImport());
 /* import history and undo */
