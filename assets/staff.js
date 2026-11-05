@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105165949";
+import { db, logout } from "./firebase.js?v=20261105171839";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261105165949";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105165949";
-import { emailSend, contact } from "./firebase-config.js?v=20261105165949";
+} from "./ui.js?v=20261105171839";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105171839";
+import { emailSend, contact } from "./firebase-config.js?v=20261105171839";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -404,19 +404,8 @@ function fmtPhone(v) {
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : String(v || "").trim();
 }
 let editingCust = "";
-const SPLIT_IN = { fanHi: "#c-fanhi", fanLo: "#c-fanlo", pcsRate: "#c-pcs", rate: "#c-rate" };
-function setSplits(c) { Object.entries(SPLIT_IN).forEach(([k, s]) => { $(s).value = splitOf(c, k); }); }
-function readSplits() {
-  const out = {};
-  for (const [k, s] of Object.entries(SPLIT_IN)) {
-    const v = parseFloat($(s).value);
-    if (isNaN(v) || v < 0 || v > 100) return "Splits must be between 0 and 100.";
-    out[k] = v;
-  }
-  return out;
-}
 function resetCustForm() {
-  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; setSplits(null); syncPayHint();
+  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; syncPayHint();
   $("#c-save").textContent = "Add consignor"; $("#c-cancel").hidden = true;
 }
 $("#c-phone").addEventListener("blur", e => { e.target.value = fmtPhone(e.target.value); });
@@ -429,14 +418,13 @@ $("#custForm").addEventListener("submit", async e => {
   const clash = S.customers.find(c => c.id !== editingCust && (c.email || "").toLowerCase() === email);
   if (clash) return say(`${email} is already the login for ${clash.name}. Each consignor needs their own email.`);
   if (phone && phone.replace(/\D/g, "").length < 10) return say("Enter a 10-digit phone number, or leave it blank.");
-  const sp = readSplits(); if (typeof sp === "string") return say(sp);
-  const r = sp.rate;
+  const r = 100;
   const payMethod = $("#c-pay").value, payTo = $("#c-payto").value.trim(), mailing = $("#c-mail").value.trim();
   if (payMethod === "venmo" && !payTo) return say("Enter their Venmo handle, or set Paid by to Not set.");
   if (payMethod === "paypal" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payTo)) return say("Enter the email address on their PayPal account.");
   if (payMethod === "check" && !mailing) return say("Enter a mailing address for their checks.");
   const pv = parseFloat($("#c-payable").value), payable = isNaN(pv) || pv < 0 ? 0 : Math.round(pv * 100) / 100;
-  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, fanHi: sp.fanHi, fanLo: sp.fanLo, pcsRate: sp.pcsRate };
+  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable };
   $("#c-save").disabled = true;
   await guarded($("#c-msg"), async () => {
     if (editingCust) {
@@ -464,7 +452,7 @@ $("#custList").addEventListener("click", e => {
   if (v) { ui.cv = v; setMode("cust"); return; }
   if (ed) {
     const c = custById(ed); editingCust = ed;
-    $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; setSplits(c);
+    $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; 
     $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; syncPayHint();
     $("#c-save").textContent = `Save ${c.code}`; $("#c-cancel").hidden = false; $("#c-msg").textContent = ""; $("#c-name").focus();
   }
@@ -645,7 +633,6 @@ function renderProfile(c, cards) {
         ${row("Inventory type", esc(c.invType || ""))}
       </dl></div>
       <div style="display:grid;gap:8px"><h3>Payouts</h3><dl class="dl">
-        ${row("Splits", esc(splitLine(c)))}
         ${row("Paid by", payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>')}
         ${row("Mailing address", esc(c.mailing || ""))}
         ${row("Last emailed", c.notifiedAt ? `${fmtDay(c.notifiedAt.slice(0, 10))}${c.notifiedAmount != null ? ` (${money(c.notifiedAmount)})` : ""}` : "")}

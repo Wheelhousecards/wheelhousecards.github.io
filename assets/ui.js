@@ -25,10 +25,11 @@ export function payLine(c) {
    - Anything else: the consignor's default split.
    A card's own split (set in its details) overrides the rule, and an exact consignor portion
    (from the old system) overrides both. */
-// Each consignor can have their own splits; these are the defaults. Splits are staff-only: customers never see a %.
+// Fixed splits for everyone (staff-only; customers never see a %). Fanatics Collect: 100% at $200 and up, 90% under $200.
+// A single card can still be given its own split from its detail view.
 export const SPLIT_DEFAULTS = { fanHi: 100, fanLo: 90, pcsRate: 95, rate: 100 };
-export const splitOf = (c, k) => { const v = c?.[k]; return v != null && v !== "" && !isNaN(+v) ? +v : SPLIT_DEFAULTS[k]; };
-export const splitLine = c => `Fanatics Collect ${splitOf(c, "fanHi")}% at $200+, ${splitOf(c, "fanLo")}% under $200 · PC Sportscards ${splitOf(c, "pcsRate")}% · Other ${splitOf(c, "rate")}%`;
+export const splitOf = (c, k) => SPLIT_DEFAULTS[k];
+export const splitLine = () => "Fanatics Collect 100% at $200+, 90% under $200";
 export function cardSplit(l, c) {
   if (l.split != null && l.split !== "") return +l.split;
   if (l.plat === "fan") return (l.price || 0) >= 200 ? splitOf(c, "fanHi") : splitOf(c, "fanLo");
