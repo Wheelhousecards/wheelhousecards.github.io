@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105132113";
+import { db, logout } from "./firebase.js?v=20261105133834";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -8,9 +8,10 @@ import {
   $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
-  isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, SPLIT_RULES
-} from "./ui.js?v=20261105132113";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105132113";
+  isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, splitLine, splitOf
+} from "./ui.js?v=20261105133834";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105133834";
+import { emailSend, contact } from "./firebase-config.js?v=20261105133834";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -140,7 +141,7 @@ function listen() {
 
 /* ---------- shell ---------- */
 const loadPhoto = async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; };
-const dash = mountDashboard($("#cust"), `<div class="sel" style="display:grid;gap:4px;width:min(280px,100%)"><label for="cv-pick">Preview as consignor</label><select id="cv-pick"></select></div>`, { loadPhoto });
+const dash = mountDashboard($("#cust"), `<div class="sel" style="display:grid;gap:4px;width:min(280px,100%)"><label for="cv-pick">Preview as consignor</label><select id="cv-pick"></select></div>`, { loadPhoto, staff: true });
 $("#cv-pick").addEventListener("change", e => { ui.cv = e.target.value; try { history.replaceState({ v: "cust", cv: ui.cv }, "", "#customer"); } catch (err) {} render(); });
 // Opening a customer page adds a browser history entry, so the browser's back button
 // (and the "Back to staff" button) returns to the staff app where you left off.
@@ -373,8 +374,19 @@ function fmtPhone(v) {
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : String(v || "").trim();
 }
 let editingCust = "";
+const SPLIT_IN = { fanHi: "#c-fanhi", fanLo: "#c-fanlo", pcsRate: "#c-pcs", rate: "#c-rate" };
+function setSplits(c) { Object.entries(SPLIT_IN).forEach(([k, s]) => { $(s).value = splitOf(c, k); }); }
+function readSplits() {
+  const out = {};
+  for (const [k, s] of Object.entries(SPLIT_IN)) {
+    const v = parseFloat($(s).value);
+    if (isNaN(v) || v < 0 || v > 100) return "Splits must be between 0 and 100.";
+    out[k] = v;
+  }
+  return out;
+}
 function resetCustForm() {
-  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable"].forEach(s => { $(s).value = ""; }); $("#c-rate").value = 85; $("#c-notify").checked = true; syncPayHint();
+  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; setSplits(null); $("#c-notify").checked = true; syncPayHint();
   $("#c-save").textContent = "Add consignor"; $("#c-cancel").hidden = true;
 }
 $("#c-phone").addEventListener("blur", e => { e.target.value = fmtPhone(e.target.value); });
@@ -387,13 +399,14 @@ $("#custForm").addEventListener("submit", async e => {
   const clash = S.customers.find(c => c.id !== editingCust && (c.email || "").toLowerCase() === email);
   if (clash) return say(`${email} is already the login for ${clash.name}. Each consignor needs their own email.`);
   if (phone && phone.replace(/\D/g, "").length < 10) return say("Enter a 10-digit phone number, or leave it blank.");
-  const rate = parseFloat($("#c-rate").value); const r = isNaN(rate) ? 85 : rate;
+  const sp = readSplits(); if (typeof sp === "string") return say(sp);
+  const r = sp.rate;
   const payMethod = $("#c-pay").value, payTo = $("#c-payto").value.trim(), mailing = $("#c-mail").value.trim();
   if (payMethod === "venmo" && !payTo) return say("Enter their Venmo handle, or set Paid by to Not set.");
   if (payMethod === "paypal" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payTo)) return say("Enter the email address on their PayPal account.");
   if (payMethod === "check" && !mailing) return say("Enter a mailing address for their checks.");
   const pv = parseFloat($("#c-payable").value), payable = isNaN(pv) || pv < 0 ? 0 : Math.round(pv * 100) / 100;
-  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, notify: $("#c-notify").checked };
+  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, fanHi: sp.fanHi, fanLo: sp.fanLo, pcsRate: sp.pcsRate, notify: $("#c-notify").checked };
   $("#c-save").disabled = true;
   await guarded($("#c-msg"), async () => {
     if (editingCust) {
@@ -421,8 +434,8 @@ $("#custList").addEventListener("click", e => {
   if (v) { ui.cv = v; setMode("cust"); return; }
   if (ed) {
     const c = custById(ed); editingCust = ed;
-    $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; $("#c-rate").value = c.rate ?? 85;
-    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || ""; $("#c-notify").checked = c.notify !== false; syncPayHint();
+    $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; setSplits(c);
+    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; $("#c-notify").checked = c.notify !== false; syncPayHint();
     $("#c-save").textContent = `Save ${c.code}`; $("#c-cancel").hidden = false; $("#c-msg").textContent = ""; $("#c-name").focus();
   }
 });
@@ -602,7 +615,7 @@ function renderProfile(c, cards) {
         ${row("Inventory type", esc(c.invType || ""))}
       </dl></div>
       <div style="display:grid;gap:8px"><h3>Payouts</h3><dl class="dl">
-        ${row("Splits", `${esc(SPLIT_RULES)} · other auction houses ${c.rate ?? 85}%`)}
+        ${row("Splits", esc(splitLine(c)))}
         ${row("Paid by", payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>')}
         ${row("Mailing address", esc(c.mailing || ""))}
         ${row("Payout emails", c.notify === false ? "Off" : "On")}
@@ -893,6 +906,37 @@ function payoutEmail(c, o) {
   ].join("\n");
   return { subject: `Your Wheelhouse consignment payout: ${money(o.amount)}`, body };
 }
+/* Payout email: preview, edit, approve and send from here. Sends through EmailJS when it's set up. */
+const mailBox = createModal();
+const canSend = () => !!(emailSend.serviceId && emailSend.templateId && emailSend.publicKey);
+function openMail(c, o, m) {
+  mailBox.open(`<div style="display:grid;gap:12px">
+    <h2>Payout email to ${esc(c.name)}</h2>
+    <div class="f"><label>To</label><div class="code">${esc(c.email)}</div></div>
+    <div class="f"><label for="pm-subj">Subject</label><input id="pm-subj" value="${esc(m.subject)}"></div>
+    <div class="f"><label for="pm-body">Message</label><textarea id="pm-body" rows="14" style="font:inherit;padding:10px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box">${esc(m.body)}</textarea></div>
+    ${canSend() ? "" : '<div class="notice"><b>Sending from the app isn’t set up yet.</b><span>Until it is, “Open in email app” hands this message to your email program.</span></div>'}
+    <div class="row">${canSend() ? '<button class="btn" type="button" id="pm-send">Approve and send</button>' : '<button class="btn" type="button" id="pm-open">Open in email app</button>'}<button class="btn ghost" type="button" id="pm-cancel">Cancel</button><span class="detect" id="pm-msg" role="status"></span></div>
+  </div>`);
+  const body = mailBox.body, val = s => $(s, body).value;
+  const logged = () => updateDoc(doc(db, "customers", c.id), { notifiedAt: now(), notifiedAmount: Math.round(o.amount * 100) / 100 });
+  $("#pm-cancel", body).addEventListener("click", () => mailBox.close());
+  $("#pm-open", body)?.addEventListener("click", async () => {
+    location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(val("#pm-subj"))}&body=${encodeURIComponent(val("#pm-body"))}`;
+    mailBox.close(); await guarded($("#p-msg"), logged); $("#p-msg").textContent = `Opened an email to ${c.email} in your email app.`;
+  });
+  $("#pm-send", body)?.addEventListener("click", async e => {
+    const btn = e.target, say = t => { $("#pm-msg", body).textContent = t; };
+    btn.disabled = true; say("Sending…");
+    try {
+      const r = await fetch("https://api.emailjs.com/api/v1.0/email/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        service_id: emailSend.serviceId, template_id: emailSend.templateId, user_id: emailSend.publicKey,
+        template_params: { to_email: c.email, to_name: c.name, subject: val("#pm-subj"), message: val("#pm-body"), reply_to: contact.email } }) });
+      if (!r.ok) throw new Error(await r.text());
+      mailBox.close(); await guarded($("#p-msg"), logged); $("#p-msg").textContent = `Sent the payout email to ${c.name} (${c.email}).`;
+    } catch (err) { console.error(err); btn.disabled = false; say("Couldn’t send it. Check your connection and try again, or use Copy message."); }
+  });
+}
 function renderPayouts() {
   const rows = S.customers.map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004).sort((a, b) => b.o.amount - a.o.amount);
   $("#p-total").textContent = rows.length ? `${money(rows.reduce((s, x) => s + x.o.amount, 0))} owed to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
@@ -915,10 +959,8 @@ $("#p-body").addEventListener("click", async e => {
   if (t.dataset.pa === "mail" || t.dataset.pa === "copy") {
     e.preventDefault();
     const m = payoutEmail(c, o);
-    if (t.dataset.pa === "mail") {
-      location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
-      msg.textContent = `Opened an email to ${c.email}. If nothing opened, use “Copy message” and paste it into your email.`;
-    } else {
+    if (t.dataset.pa === "mail") return openMail(c, o, m);
+    else {
       try { await navigator.clipboard.writeText(`To: ${c.email}\nSubject: ${m.subject}\n\n${m.body}`); msg.textContent = `Copied the message for ${c.name}. Paste it into an email to ${c.email}.`; }
       catch (err) { msg.textContent = "Your browser blocked copying. Use the Email button instead."; return; }
     }
@@ -1447,7 +1489,7 @@ function planCust() {
     if (ex) return { act: "skip", why: `Already a consignor (${ex.code})`, label, email };
     let rate = parseFloat(g("rate").replace(/[^0-9.]/g, ""));
     if (rate > 0 && rate <= 1) rate = Math.round(rate * 1000) / 10;
-    if (isNaN(rate) || rate < 0 || rate > 100) rate = 85;
+    if (isNaN(rate) || rate < 0 || rate > 100) rate = 100;
     const code = fileCode && !codes.has(fileCode) ? fileCode : nextCode(name, codes);
     codes.add(code);
     const pay = parsePayout(g("pay1"), g("pay2"), g("addr2"), g("city"), g("state"), g("zip"));

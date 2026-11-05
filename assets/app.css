@@ -206,3 +206,6 @@ input.auction::placeholder{text-transform:none;font-family:var(--body)}
 
 .ebay-find{display:inline-block;margin-top:3px;font-size:12px;font-weight:600;color:#4472C3;text-decoration:none}
 .ebay-find:hover{text-decoration:underline}
+.splits{display:grid;gap:6px}.splits .lbl{font-size:12px;font-weight:600}
+.splitrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.card .right .amt.recv{color:#2a7a3b}

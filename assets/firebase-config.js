@@ -15,3 +15,11 @@ export const contact = {
   phone: "",
   site: "https://wheelhousecards.com"
 };
+
+// Sending payout emails straight from the staff app (EmailJS, free up to 200 emails a month).
+// Leave these blank and the app falls back to opening your email app.
+export const emailSend = {
+  serviceId: "",
+  templateId: "",
+  publicKey: ""
+};
