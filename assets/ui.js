@@ -48,7 +48,7 @@ export const CUST_ITEM_STAT = { live: "Listed", awaiting: "Sold · payment pendi
 // What the customer sees: a cancelled sale that's been relisted shows only as the new listing.
 export const custItems = items => (items || []).filter(x => !(x.status === "cancelled" && x.relistedAs));
 // PC Sportscards' eBay seller name. Once set, "Find on eBay" only searches their listings.
-export const PCS_SELLER = "";
+export const PCS_SELLER = "pc_sportscards";
 // Searches eBay for the card's exact PC Sportscards title (limited to their store once PCS_SELLER is set).
 // Sold cards search eBay's sold listings instead of live ones.
 export function ebayFind(x) {
