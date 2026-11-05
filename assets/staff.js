@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105164928";
+import { db, logout } from "./firebase.js?v=20261105165350";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261105164928";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105164928";
-import { emailSend, contact } from "./firebase-config.js?v=20261105164928";
+} from "./ui.js?v=20261105165350";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105165350";
+import { emailSend, contact } from "./firebase-config.js?v=20261105165350";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -285,7 +285,7 @@ function renderLedger() {
       <td><span class="chip ${l.plat}">${l.plat === "fan" ? "Fanatics" : "PCS / eBay"}</span></td>
       <td class="title">${l.photo ? `<img src="${l.photo.thumb}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px">` : ""}${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
-      <td>${l.format === "bin" ? "Buy It Now" : "Auction"}</td>
+      <td>${isDropoff(l) ? "Auction" : `<select data-f="format" aria-label="Format for SKU ${esc(l.sku)}"><option value="auction"${l.format !== "bin" ? " selected" : ""}>Auction</option><option value="bin"${l.format === "bin" ? " selected" : ""}>Buy It Now</option></select>`}</td>
       <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${money(cardPayout(l, custById(l.cust)))} to consignor${l.payout == null && !isDropoff(l) ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
       <td class="num"><input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}</td>
       <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
@@ -1038,6 +1038,7 @@ $("#tbody").addEventListener("change", async e => {
       await updateDoc(listingRef(l.id), { period: v, updatedAt: serverTimestamp() });
       lmsg(v ? `SKU ${l.sku} is in auction ${v}.` : `Cleared the auction # on SKU ${l.sku}.`);
     }
+    if (f === "format") { const v = e.target.value; await updateDoc(listingRef(l.id), { format: v, updatedAt: serverTimestamp() }); lmsg(`SKU ${l.sku} is now ${v === "bin" ? "Buy It Now" : "Auction"}.`); }
     if (f === "price") { const p = parseFloat(e.target.value); await updateDoc(listingRef(l.id), { price: isNaN(p) ? null : p, updatedAt: serverTimestamp() }); }
     if (f === "status") {
       const s = e.target.value, data = { status: s, updatedAt: serverTimestamp() };
