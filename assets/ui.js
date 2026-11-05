@@ -54,7 +54,9 @@ export const PCS_SELLER = "pc_sportscards";
 export function ebayFind(x) {
   const q = encodeURIComponent(x.title || x.pcsId || "");
   const done = x.status === "sold" || x.status === "paid" || x.status === "awaiting";
-  return `https://www.ebay.com/sch/i.html?_nkw=${q}${PCS_SELLER ? `&_ssn=${encodeURIComponent(PCS_SELLER)}` : ""}${done ? "&LH_Sold=1&LH_Complete=1" : ""}`;
+  // PC sells the same card for many consignors over time, so a sold search also pins the exact sale price.
+  const p = done && x.price > 0 ? `&_udlo=${(x.price - 0.01).toFixed(2)}&_udhi=${(x.price + 0.01).toFixed(2)}` : "";
+  return `https://www.ebay.com/sch/i.html?_nkw=${q}${PCS_SELLER ? `&_ssn=${encodeURIComponent(PCS_SELLER)}` : ""}${done ? "&LH_Sold=1&LH_Complete=1" : ""}${p}`;
 }
 export const itemShare = (x, c) => (x.net != null ? x.net : (x.price || 0)) * (x.split != null && x.split !== "" ? +x.split : splitOf(c, "pcsRate")) / 100;
 export function dropoffSummary(items = []) {
