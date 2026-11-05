@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105123601";
+import { db, logout } from "./firebase.js?v=20261105130237";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,8 +9,8 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, SPLIT_RULES
-} from "./ui.js?v=20261105123601";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105123601";
+} from "./ui.js?v=20261105130237";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105130237";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -243,7 +243,7 @@ function renderLedger() {
   const fav = $("#f-added").value, fa = fav === "today" ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString() : fav === "7d" ? new Date(Date.now() - 7 * 864e5).toISOString() : fav === "1h" ? new Date(Date.now() - 36e5).toISOString() : "";
   const loading = past && !S.hist;
   const rows = (loading ? [] : S.all).filter(l =>
-    (view === "all" ? l.status !== "removed" : view === "play" ? !PAST.includes(l.status) : l.status === view) &&
+    (view === "all" || view === "batch" ? l.status !== "removed" : view === "play" ? !PAST.includes(l.status) : l.status === view) &&
     (!fa || (l.added || "") >= fa) &&
     (!fc || (fc === "__none" ? !custById(l.cust) : l.cust === fc)) &&
     (!fp || l.plat === fp) && (!fs || l.status === fs) &&
@@ -252,7 +252,12 @@ function renderLedger() {
   ).sort(view === "paid" || view === "returned"
     ? (a, b) => (b.soldDate || b.added || "").localeCompare(a.soldDate || a.added || "") || (b.sku || "").localeCompare(a.sku || "")
     : (a, b) => (a.status === "live" ? 0 : 1) - (b.status === "live" ? 0 : 1) || (b.sku || "").localeCompare(a.sku || ""));
-  const viewName = { play: "in play", paid: "paid out", returned: "returned", all: "in total", removed: "removed" }[view];
+  const viewName = { play: "in play", paid: "paid out", returned: "returned", all: "in total", removed: "removed", batch: "in total" }[view];
+  if (view === "batch") {
+    // Group by batch (newest first); cards without a batch go last.
+    const bOrder = new Map([...S.batches].sort((a, b) => (b.recv || "").localeCompare(a.recv || "") || b.id.localeCompare(a.id)).map((b, i) => [b.id, i]));
+    rows.sort((a, b) => (bOrder.get(a.batch) ?? 1e9) - (bOrder.get(b.batch) ?? 1e9) || (b.sku || "").localeCompare(a.sku || ""));
+  }
   $("#bb-del").hidden = view === "removed"; $("#bb-restore").hidden = view !== "removed"; $("#bb-purge").hidden = view !== "removed";
   $("#count").textContent = loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
   $("#th-price").textContent = view === "paid" ? "Sale / to consignor" : "Price / bid";
@@ -260,9 +265,19 @@ function renderLedger() {
   ui.visible = rows.map(l => l.id);
   const custSel = [...S.customers].sort(byName).map(x => `<option value="${x.id}">${esc(x.name)} · ${esc(x.code)}</option>`).join("");
   const shown = rows.slice(0, 500);
+  let lastB = null;
+  const batchHead = l => {
+    if (view !== "batch") return "";
+    const key = batchById(l.batch) ? l.batch : "";
+    if (key === lastB) return "";
+    lastB = key;
+    const b = batchById(key), inB = rows.filter(x => (batchById(x.batch) ? x.batch : "") === key);
+    const bc = b && custById(b.cust), sold = inB.filter(x => x.status === "sold" || x.status === "paid").length;
+    return `<tr class="grp"><td colspan="12">${b ? `<span class="code">${esc(b.id)}</span> · ${bc ? `<button class="linkbtn" type="button" data-cust="${bc.id}">${esc(bc.name)}</button>` : "No customer"} · ${PLAT[b.plat] || ""} · received ${fmtDay(b.recv)}${b.ship ? ` · shipped ${fmtDay(b.ship)}` : " · not shipped"}` : "Not in a batch"} <span class="muted" style="font-weight:400">· ${inB.length} card${inB.length === 1 ? "" : "s"} · ${sold} sold${b?.cards ? ` · ${b.cards} sent` : ""}</span></td></tr>`;
+  };
   tb.innerHTML = shown.length ? shown.map(l => {
     const c = custById(l.cust), on = ui.sel.has(l.id);
-    return `<tr data-id="${l.id}"${on ? ' class="on"' : ""}>
+    return batchHead(l) + `<tr data-id="${l.id}"${on ? ' class="on"' : ""}>
       <td><input type="checkbox" class="sel" aria-label="Select SKU ${esc(l.sku)}"${on ? " checked" : ""}></td>
       <td class="code num"><button class="linkbtn code" type="button" data-open="${l.id}" aria-label="Details for SKU ${esc(l.sku)}">${esc(l.sku)}</button>${l.batch && batchById(l.batch) ? `<div class="cert">${esc(l.batch)}</div>` : ""}</td>
       <td>${c ? `<span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button>` : `<select data-f="cust" aria-label="Assign a consignor to SKU ${esc(l.sku)}" style="border-color:var(--paid)"><option value="">Needs consignor…</option>${custSel}</select>`}</td>
@@ -467,7 +482,7 @@ function openDropDetail(l) {
       <div class="f w6"><h3>Edit</h3></div>
       <div class="f"><label for="dx-date">Dropped off</label><input id="dx-date" type="date" value="${v(l.dropDate)}"></div>
       <div class="f"><label for="dx-n">Cards dropped off</label><input id="dx-n" type="number" min="0" step="1" value="${l.expected || ""}"></div>
-      <div class="f"><label for="dx-batch">PC batch</label><select id="dx-batch"><option value="">No batch</option>${pcsBatches().map(b => `<option value="${b.id}"${b.id === l.batch ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join("")}</select></div>
+      <div class="f"><label for="dx-batch">PC batch</label><select id="dx-batch"><option value="">No batch</option>${pcsBatches(l.cust).map(b => `<option value="${b.id}"${b.id === l.batch ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join("")}</select></div>
       <div class="f w6"><label for="dx-cust">Customer</label><select id="dx-cust">${custOptions(l.cust)}</select></div>
       <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="dx-fmsg" role="status"></span></div></div>
     </form>`);
@@ -747,7 +762,8 @@ async function savePool(rows) {
   S.pool = rows;
 }
 const psSel = new Set();
-const pcsBatches = () => S.batches.filter(b => b.plat === "pcs").sort((a, b) => b.id.localeCompare(a.id));
+// Batches belong to one customer, so only that customer's PC batches are offered.
+const pcsBatches = cust => S.batches.filter(b => b.plat === "pcs" && (!cust || b.cust === cust)).sort((a, b) => b.id.localeCompare(a.id));
 const dropoffsFor = cust => S.all.filter(l => isDropoff(l) && l.cust === cust && l.status !== "removed").sort((a, b) => (b.dropDate || "").localeCompare(a.dropDate || ""));
 async function newDropoff({ cust, dropDate, batch, expected = 0, items = [], photos = [] }) {
   const sku = pad6(await reserve("sku", 1, maxSku()));
@@ -783,14 +799,14 @@ function renderSort() {
     $("#ps-newwrap").hidden = $("#ps-sku").value !== "__new";
     if (!$("#ps-date").value) $("#ps-date").value = today();
     const pb = $("#ps-batch").value;
-    if (document.activeElement !== $("#ps-batch")) $("#ps-batch").innerHTML = '<option value="">No batch</option>' + pcsBatches().map(b => `<option value="${b.id}"${b.id === pb ? " selected" : ""}>Batch ${esc(b.id)}${b.ship ? ` · shipped ${fmtDay(b.ship)}` : ""}</option>`).join("");
+    if (document.activeElement !== $("#ps-batch")) $("#ps-batch").innerHTML = '<option value="">No batch</option>' + pcsBatches($("#ps-cust").value || "__none").map(b => `<option value="${b.id}"${b.id === pb ? " selected" : ""}>Batch ${esc(b.id)}${b.ship ? ` · shipped ${fmtDay(b.ship)}` : ""}</option>`).join("");
     $("#ps-batch").disabled = $("#ps-sku").value !== "__new";
     $("#ps-go").textContent = $("#ps-sku").value === "__new" ? `Create SKU with ${psSel.size} card${psSel.size === 1 ? "" : "s"}` : `Add ${psSel.size} to that SKU`;
     $("#ps-hide").textContent = hid ? "Put back in the list" : "Not consigned";
   }
   // drop-off form selects
   if (document.activeElement !== $("#psn-cust")) $("#psn-cust").innerHTML = '<option value="">Choose customer…</option>' + custOptions($("#psn-cust").value);
-  if (document.activeElement !== $("#psn-batch")) { const v = $("#psn-batch").value; $("#psn-batch").innerHTML = '<option value="">No batch</option>' + pcsBatches().map(b => `<option value="${b.id}"${b.id === v ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join(""); }
+  if (document.activeElement !== $("#psn-batch")) { const v = $("#psn-batch").value; $("#psn-batch").innerHTML = '<option value="">No batch</option>' + pcsBatches($("#psn-cust").value || "__none").map(b => `<option value="${b.id}"${b.id === v ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join(""); }
   if (!$("#psn-date").value) $("#psn-date").value = today();
 }
 const dropoffCount = () => S.all.some(isDropoff);
@@ -800,7 +816,7 @@ $("#ps-all").addEventListener("change", e => {
   const ids = [...$("#ps-body").querySelectorAll("input.pss")].map(x => x.dataset.id);
   ids.forEach(id => e.target.checked ? psSel.add(id) : psSel.delete(id)); renderSort();
 });
-["#ps-cust", "#ps-sku"].forEach(x => $(x).addEventListener("change", e => { e.target.blur(); renderSort(); }));
+["#ps-cust", "#ps-sku", "#psn-cust"].forEach(x => $(x).addEventListener("change", e => { e.target.blur(); renderSort(); }));
 $("#ps-clear").addEventListener("click", () => { psSel.clear(); renderSort(); });
 $("#ps-hide").addEventListener("click", async () => {
   const hid = $("#ps-hidden").value === "1", n = psSel.size;
@@ -1054,7 +1070,7 @@ $("#bb-clear").addEventListener("click", () => { ui.sel.clear(); delArm = false;
 let editingBatch = "", pending = [], bDelArm = "";
 function renderBatches() {
   const pc = $("#b-cust").value;
-  $("#b-cust").innerHTML = '<option value="">Choose…</option>' + `<option value="__multi"${pc === "__multi" ? " selected" : ""}>Several customers (PC shipment)</option>` + custOptions(pc);
+  $("#b-cust").innerHTML = '<option value="">Choose…</option>' + custOptions(pc);
   const bc = $("#bf-cust").value; $("#bf-cust").innerHTML = custOptions(bc, true);
   if (!$("#b-recv").value && !editingBatch) $("#b-recv").value = today();
   const sort = $("#bf-sort").value, nm = b => custById(b.cust)?.name || "~";
@@ -1122,7 +1138,7 @@ $("#bForm").addEventListener("submit", async e => {
   e.preventDefault();
   const say = t => { $("#b-msg").textContent = t; };
   const cv = $("#b-cust").value, multi = cv === "__multi", cust = multi ? "" : cv;
-  if (!multi && !custById(cust)) return say("Choose the customer this batch belongs to, or Several customers for a PC shipment.");
+  if (!custById(cust)) return say("Choose the customer this batch belongs to. Each batch is for one customer.");
   const recv = $("#b-recv").value, ship = $("#b-ship").value;
   if (!recv) return say("Enter the date you received the cards.");
   if (ship && ship < recv) return say("The ship date is before the date received. Check the dates.");
@@ -1168,7 +1184,7 @@ $("#b-body").addEventListener("click", async e => {
     $("#ledger").scrollIntoView({ block: "start" });
   }
   if (a === "edit") {
-    editingBatch = id; bDelArm = ""; $("#b-cust").value = b.cust || "__multi"; $("#b-plat").value = b.plat; $("#b-cards").value = b.cards || "";
+    editingBatch = id; bDelArm = ""; $("#b-cust").value = b.cust || ""; $("#b-plat").value = b.plat; $("#b-cards").value = b.cards || "";
     $("#b-recv").value = b.recv || ""; $("#b-ship").value = b.ship || ""; $("#b-notes").value = S.notes[id] || ""; pending = (b.photos || []).map(p => ({ ...p }));
     $("#b-save").textContent = `Save ${id}`; $("#b-cancel").hidden = false; $("#b-msg").textContent = ""; renderPending();
     $("#batches").scrollIntoView({ block: "start" });
@@ -1222,6 +1238,7 @@ const FIELDS = [
   { k: "sku", label: "SKU", re: /sku/i },
   { k: "plat", label: "Auction house", re: /platform|site|market|auction ?house/i, only: "full" },
   { k: "batch", label: "Batch", re: /batch/i, only: "full" },
+  { k: "split", label: "Split % (override)", re: /split/i, only: "full" },
 ];
 let imp = null, importing = false;
 const itype = () => document.querySelector('input[name="itype"]:checked').value;
@@ -1366,7 +1383,7 @@ function planImport() {
     let url = g("url"), item = g("item").replace(/\D/g, ""); const d = detect(url);
     if (!item && d) item = d.item;
     const pv = g("plat");
-    const plat = type === "pcs" ? "pcs" : d ? d.plat : /fan/i.test(pv) ? "fan" : /pc|ebay/i.test(pv) ? "pcs" : "";
+    const plat = type === "pcs" ? "pcs" : d ? d.plat : pv ? (/ebay/i.test(pv) ? "pcs" : platFromShelf(pv)) : "";
     if (!url && item && plat === "pcs") url = "https://www.ebay.com/itm/" + item;
     const title = g("title");
     if (!title && !item && !url) return null;
@@ -1379,7 +1396,7 @@ function planImport() {
     const pr = g("price").replace(/[^0-9.]/g, ""), price = pr ? parseFloat(pr) : null;
     const period = g("period").toUpperCase(), ends = "";
     const sv = g("status").toLowerCase();
-    const status = !sv ? "" : /unsold|not sold|no sale|return/.test(sv) ? "unsold" : /paid/.test(sv) ? "paid" : /sold/.test(sv) ? "sold" : "live";
+    const status = !sv ? "" : /curat/.test(sv) ? "curating" : /unsold|not sold|no sale|return/.test(sv) ? "unsold" : /paid/.test(sv) ? "paid" : /sold/.test(sv) ? "sold" : "live";
     const fv = g("format").toLowerCase();
     const format = /bin|buy|fixed/.test(fv) ? "bin" : /auc/.test(fv) ? "auction" : plat === "pcs" ? "auction" : "bin";
     const bt = pick || (g("batch") && batchById(g("batch").toUpperCase())) || null;
@@ -1390,6 +1407,9 @@ function planImport() {
       if (c) cust = c.id; else warn = cv ? `Consignor “${g("cust")}” not found` : "No consignor in this row";
     }
     if (!cust && bt) { cust = bt.cust; warn = ""; }
+    // A batch belongs to one consignor, so a row can't put someone else's card into it.
+    if (bt && cust && bt.cust && bt.cust !== cust) return { act: "skip", why: `Batch ${bt.id} belongs to ${custById(bt.cust)?.name || "another consignor"}`, label };
+    const sp = parseFloat(g("split").replace(/[^0-9.]/g, "")), split = isNaN(sp) ? null : sp <= 1 && sp > 0 ? sp * 100 : sp;
     const ex = item && byItem.get(item);
     if (ex && ex.status === "removed") return { act: "skip", why: `Removed earlier (SKU ${ex.sku}). Restore it from the Removed tab to bring it back.`, label };
     if (ex) return { act: "update", label: title, target: ex, price, period, status, cust, batch: bt ? bt.id : "", warn: "" };
@@ -1398,7 +1418,7 @@ function planImport() {
     if (!sku || used.has(sku)) { while (used.has(pad6(next))) next++; sku = pad6(next++); auto = true; }
     used.add(sku);
     if (grade !== "Ungraded" && !cert) warn = warn || "Graded, but no cert #";
-    return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends, ...(period ? { period } : {}), status: status || (url ? "live" : "curating"), soldDate: (status === "sold" || status === "paid") ? now() : "" } };
+    return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends, ...(split != null ? { split } : {}), ...(period ? { period } : {}), status: status || (url ? "live" : "curating"), soldDate: (status === "sold" || status === "paid") ? now() : "" } };
   }).filter(Boolean);
 }
 function planCust() {
