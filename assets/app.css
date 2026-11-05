@@ -203,3 +203,6 @@ input.auction::placeholder{text-transform:none;font-family:var(--body)}
 #ledger table{min-width:1180px}
 #ledger td.title{min-width:200px;max-width:340px}
 #ledger td select[data-f="status"]{min-width:118px}
+
+.ebay-find{display:inline-block;margin-top:3px;font-size:12px;font-weight:600;color:#4472C3;text-decoration:none}
+.ebay-find:hover{text-decoration:underline}

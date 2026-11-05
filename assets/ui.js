@@ -38,6 +38,13 @@ export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.net != null
    paid (paid out to the consignor) or unsold. */
 export const isDropoff = l => !!(l && l.kind === "dropoff");
 export const ITEM_STAT = { live: "Listed", sold: "Sold", paid: "Paid out", unsold: "Unsold" };
+// PC Sportscards starts each eBay title with its card #, so searching that number finds the exact listing.
+// Sold cards search eBay's sold listings instead of live ones.
+export function ebayFind(x) {
+  const q = encodeURIComponent(x.pcsId || x.title || "");
+  const done = x.status === "sold" || x.status === "paid";
+  return `https://www.ebay.com/sch/i.html?_nkw=${q}${done ? "&LH_Sold=1&LH_Complete=1" : ""}`;
+}
 export const itemShare = (x, c) => (x.net != null ? x.net : (x.price || 0)) * (x.split ?? 95) / 100;
 export function dropoffSummary(items = []) {
   const n = k => items.filter(x => x.status === k).length;
@@ -149,7 +156,7 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     const items = l.items || [], sm = dropoffSummary(items);
     const head = `Cards in this drop-off (${items.length}${l.expected && l.expected !== items.length ? ` of ${l.expected} dropped off` : ""})`;
     lot = `<div style="display:grid;gap:8px"><h3>${head}</h3>` + (items.length
-      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${x.pcsId ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}</td><td><span class="st ${x.status === "live" ? "live" : x.status}">${ITEM_STAT[x.status] || esc(x.status)}</span></td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? money(itemShare(x, c)) : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
+      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${x.pcsId ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status}">${ITEM_STAT[x.status] || esc(x.status)}</span></td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? money(itemShare(x, c)) : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
       : `<div class="empty" style="padding:16px">${staff ? "No cards in this drop-off yet. Select them in the PC Sportscards sorting list and add them here." : "We’re itemizing the cards from this drop-off. They’ll show up here once PC Sportscards lists them."}</div>`) + `</div>`;
   } else if (isLot(l)) {
     const items = l.items || [];
