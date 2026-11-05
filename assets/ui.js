@@ -122,7 +122,7 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     ["Auction house", `<span class="chip ${l.plat}">${PLAT[l.plat] || "Other"}</span>`],
     ...(l.period ? [[l.plat === "pcs" ? "Payout month" : "Auction", esc(l.period)]] : []),
     ["Grade", gradeHtml(l, false)],
-    ...(staff && c ? [["Consignor", `<span class="code">${esc(c.code)}</span> ${esc(c.name)}`]] : []),
+    ...(staff && c ? [["Consignor", `<span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${esc(c.id)}">${esc(c.name)}</button>`]] : []),
     ...(l.batch ? [["Batch", `<span class="code">${esc(l.batch)}</span>`]] : []),
     ...(l.added ? [["Added", fmtLong(l.added)]] : []),
     ...(l.status === "live" ? [[l.format === "bin" ? "Asking price" : "Current bid", money(l.price)], ...(l.format === "auction" && l.ends ? [["Ends", `${fmtLong(l.ends)} (${timeLeft(l.ends)})`]] : [])] : []),

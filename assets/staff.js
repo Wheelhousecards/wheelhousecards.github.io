@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105113741";
+import { db, logout } from "./firebase.js?v=20261105121339";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,8 +9,8 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare
-} from "./ui.js?v=20261105113741";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105113741";
+} from "./ui.js?v=20261105121339";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105121339";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -226,7 +226,7 @@ function renderCustList() {
   $("#custList").innerHTML = list.length ? list.map(c => {
     const k = cnt.get(c.id) || { n: 0, live: 0 }, live = k.live;
     const tot = S.hist ? `${live} live / ${k.n} total` : `${live} live / ${k.n} in play`;
-    return `<div class="cust"><span class="code">${esc(c.code)}</span><div style="min-width:0"><div style="font-weight:600">${esc(c.name)}</div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${esc(c.email || "No email")} · ${esc(c.phone || "No phone")}</div><div class="muted" style="font-size:12px">${c.rate ?? 85}% payout · ${tot}${c.payable ? ` · <span class="need">${money(c.payable)} carried over</span>` : ""}</div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">No payout method</span>'}${c.notify === false ? " · payout emails off" : ""}${c.payNote ? ` · ${esc(c.payNote)}` : ""}</div></div><div class="row" style="gap:6px"><button class="btn ghost sm" type="button" data-edit="${c.id}">Edit</button><button class="btn ghost sm" type="button" data-view="${c.id}">View</button></div></div>`;
+    return `<div class="cust"><span class="code">${esc(c.code)}</span><div style="min-width:0"><div style="font-weight:600"><button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button></div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${esc(c.email || "No email")} · ${esc(c.phone || "No phone")}</div><div class="muted" style="font-size:12px">${c.rate ?? 85}% payout · ${tot}${c.payable ? ` · <span class="need">${money(c.payable)} carried over</span>` : ""}</div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">No payout method</span>'}${c.notify === false ? " · payout emails off" : ""}${c.payNote ? ` · ${esc(c.payNote)}` : ""}</div></div><div class="row" style="gap:6px"><button class="btn ghost sm" type="button" data-edit="${c.id}">Edit</button><button class="btn ghost sm" type="button" data-view="${c.id}">View</button></div></div>`;
   }).join("") : `<div class="empty">${S.customers.length ? "No consignors match that search." : "No consignors yet. Add one below."}</div>`;
 }
 
@@ -265,7 +265,7 @@ function renderLedger() {
     return `<tr data-id="${l.id}"${on ? ' class="on"' : ""}>
       <td><input type="checkbox" class="sel" aria-label="Select SKU ${esc(l.sku)}"${on ? " checked" : ""}></td>
       <td class="code num"><button class="linkbtn code" type="button" data-open="${l.id}" aria-label="Details for SKU ${esc(l.sku)}">${esc(l.sku)}</button>${l.batch && batchById(l.batch) ? `<div class="cert">${esc(l.batch)}</div>` : ""}</td>
-      <td>${c ? `<span class="code">${esc(c.code)}</span> ${esc(c.name)}` : `<select data-f="cust" aria-label="Assign a consignor to SKU ${esc(l.sku)}" style="border-color:var(--paid)"><option value="">Needs consignor…</option>${custSel}</select>`}</td>
+      <td>${c ? `<span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button>` : `<select data-f="cust" aria-label="Assign a consignor to SKU ${esc(l.sku)}" style="border-color:var(--paid)"><option value="">Needs consignor…</option>${custSel}</select>`}</td>
       <td><span class="chip ${l.plat}">${l.plat === "fan" ? "Fanatics" : "PCS / eBay"}</span></td>
       <td class="title">${l.photo ? `<img src="${l.photo.thumb}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px">` : ""}${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
@@ -518,7 +518,106 @@ function renderStmt() {
   $("#d-items-go").hidden = !items.length;
   $("#d-items-go").textContent = `Save ${items.length} cards to this lot`;
 }
-document.addEventListener("click", e => { const t = e.target.closest("[data-open]"); if (t) openDetail(t.dataset.open); });
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-open]");
+  if (t) {
+    const fromProfile = profileCust && detail.isOpen && detail.body.contains(t) && !!detail.body.querySelector("[data-pf]");
+    openDetail(t.dataset.open);
+    const c = custById(profileCust);
+    if (fromProfile && c) detail.body.insertAdjacentHTML("afterbegin", `<button class="linkbtn" type="button" data-cust="${c.id}" style="justify-self:start">← Back to ${esc(c.name)}</button>`);
+    return;
+  }
+  const u = e.target.closest("[data-cust]"); if (u) openCustomer(u.dataset.cust);
+});
+
+/* ---------- consignor profile (click a consignor's name) ---------- */
+let profileCust = "";
+const ym = iso => (iso || "").slice(0, 7);
+const monthName = k => k ? new Date(k + "-15T12:00:00").toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "No date";
+async function cardsOf(id) {
+  if (S.hist) return S.listings.filter(l => l.cust === id);
+  if (!custHist.get(id)) custHist.set(id, (await getDocs(query(col("listings"), where("cust", "==", id)))).docs.map(d => ({ id: d.id, ...d.data() })));
+  const m = new Map(custHist.get(id).map(l => [l.id, l])); S.listings.filter(l => l.cust === id).forEach(l => m.set(l.id, l));
+  return [...m.values()].filter(l => l.status !== "removed");
+}
+async function openCustomer(id) {
+  const c = custById(id); if (!c) return;
+  profileCust = id;
+  detail.open(`<div class="loading">Loading ${esc(c.name)}…</div>`);
+  let cards;
+  try { cards = await cardsOf(id); } catch (e) { detail.body.innerHTML = `<div class="empty">Couldn’t load ${esc(c.name)}’s cards. Check your connection and try again.</div>`; return; }
+  if (profileCust !== id || !detail.isOpen) return;
+  renderProfile(c, cards);
+}
+function renderProfile(c, cards) {
+  const o = owedFor(c, cards);
+  const singles = cards.filter(l => !isDropoff(l)), drops = cards.filter(isDropoff);
+  const count = k => singles.filter(l => l.status === k).length;
+  // Every sale, from single cards and from cards inside drop-off SKUs.
+  const sales = [
+    ...singles.filter(l => l.status === "sold" || l.status === "paid").map(l => ({ date: l.soldDate || l.added, price: l.price || 0, share: cardPayout(l, c), paid: l.status === "paid", sku: l.sku, id: l.id, title: l.title })),
+    ...drops.flatMap(d => (d.items || []).filter(x => x.status === "sold" || x.status === "paid").map(x => ({ date: x.soldDate || d.dropDate, price: x.price || 0, share: itemShare(x, c), paid: x.status === "paid", sku: d.sku, id: d.id, title: x.title }))),
+  ];
+  const lifetimeGross = sales.reduce((s, x) => s + x.price, 0), lifetimeShare = sales.reduce((s, x) => s + x.share, 0);
+  const byMonth = new Map();
+  sales.forEach(x => { const k = ym(x.date), e = byMonth.get(k) || byMonth.set(k, { n: 0, gross: 0, share: 0, owed: 0 }).get(k); e.n++; e.gross += x.price; e.share += x.share; if (!x.paid) e.owed += x.share; });
+  const months = [...byMonth].sort((a, b) => b[0].localeCompare(a[0]));
+  const payouts = [...(c.payouts || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const live = singles.filter(l => l.status === "live"), liveVal = live.reduce((s, l) => s + (l.price || 0), 0);
+  const itemsLive = drops.flatMap(d => (d.items || []).filter(x => x.status === "live")).length;
+  const batches = S.batches.filter(b => b.cust === c.id || drops.some(d => d.batch === b.id)).sort((a, b) => (b.recv || "").localeCompare(a.recv || ""));
+  const row = (k, v) => v ? `<dt>${k}</dt><dd>${v}</dd>` : "";
+  const recent = [...cards].sort((a, b) => (b.soldDate || b.added || "").localeCompare(a.soldDate || a.added || ""));
+  detail.open(`<div style="display:grid;gap:16px">
+    <div><div class="muted" style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">Consignor <span class="code">${esc(c.code)}</span></div><h2 style="text-transform:none;letter-spacing:0;font-size:28px">${esc(c.name)}</h2>${c.company ? `<div class="muted">${esc(c.company)}</div>` : ""}</div>
+    <div class="row" style="gap:8px"><button class="btn sm" type="button" data-pf="edit">Edit details</button><button class="btn ghost sm" type="button" data-pf="view">See their page</button><button class="btn ghost sm" type="button" data-pf="cards">Show their cards in the list</button></div>
+    <div class="stats">
+      <div class="stat"><span class="k">Owed now</span><span class="v">${money(o.amount)}</span><span class="s">${o.count} sold card${o.count === 1 ? "" : "s"} unpaid${c.payable ? ` · ${money(c.payable)} carried over` : ""}</span></div>
+      <div class="stat"><span class="k">Live now</span><span class="v">${live.length + itemsLive}</span><span class="s">${money(liveVal)} asking / bid${drops.length ? ` · ${itemsLive} in PC drop-offs` : ""}</span></div>
+      <div class="stat"><span class="k">Lifetime sales</span><span class="v">${money(lifetimeGross)}</span><span class="s">${sales.length} cards sold</span></div>
+      <div class="stat"><span class="k">Their share, all time</span><span class="v">${money(lifetimeShare)}</span><span class="s">${payouts.length ? `Last paid ${fmtDay(payouts[0].date)}` : "No payouts logged here yet"}</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
+      <div style="display:grid;gap:8px"><h3>Contact</h3><dl class="dl">
+        ${row("Email", c.email ? `${esc(c.email)}` : '<span class="need">None. They can’t sign in yet.</span>')}
+        ${row("Phone", esc(c.phone || "—"))}
+        ${row("Consignor since", c.since ? fmtDay(c.since) : "")}
+        ${row("Added by", esc(c.addedByName || ""))}
+        ${row("Inventory type", esc(c.invType || ""))}
+      </dl></div>
+      <div style="display:grid;gap:8px"><h3>Payouts</h3><dl class="dl">
+        ${row("Split", `${c.rate ?? 85}% to the consignor`)}
+        ${row("Paid by", payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>')}
+        ${row("Mailing address", esc(c.mailing || ""))}
+        ${row("Payout emails", c.notify === false ? "Off" : "On")}
+        ${row("Last emailed", c.notifiedAt ? `${fmtDay(c.notifiedAt.slice(0, 10))}${c.notifiedAmount != null ? ` (${money(c.notifiedAmount)})` : ""}` : "")}
+        ${row("Old-system balance", c.balance ? money(c.balance) : "")}
+        ${row("Notes", esc(c.payNote || ""))}
+      </dl></div>
+    </div>
+    <div style="display:grid;gap:8px"><h3>Payout history</h3>${payouts.length
+      ? `<div class="tbl-wrap"><table class="prev" style="min-width:480px"><thead><tr><th>Date</th><th>Amount</th><th>Cards</th><th>Sent by</th><th>Logged by</th></tr></thead><tbody>${payouts.map(p => `<tr><td class="num">${fmtDay(p.date)}</td><td class="num">${money(p.amount)}</td><td class="num">${p.cards ?? ""}</td><td>${esc(p.method ? (PAYM[p.method] || p.method) + (p.payTo ? ` ${p.payTo}` : "") : "")}</td><td class="muted">${esc(p.by || "")}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="muted" style="font-size:13px">No payouts have been marked paid in this app yet. Payouts from the old system show below as paid-out months.</div>`}</div>
+    <div style="display:grid;gap:8px"><h3>Sales by month</h3>${months.length
+      ? `<div class="tbl-wrap" style="max-height:320px;overflow:auto"><table class="prev" style="min-width:480px"><thead><tr><th>Month</th><th>Cards sold</th><th>Sales</th><th>Their share</th><th>Status</th></tr></thead><tbody>${months.map(([k, e]) => `<tr><td>${monthName(k)}</td><td class="num">${e.n}</td><td class="num">${money(e.gross)}</td><td class="num">${money(e.share)}</td><td>${e.owed > 0.004 ? `<span class="st sold">Owed ${money(e.owed)}</span>` : '<span class="st paid">Paid out</span>'}</td></tr>`).join("")}</tbody></table></div>`
+      : '<div class="muted" style="font-size:13px">No sales yet.</div>'}</div>
+    ${batches.length || drops.length ? `<div style="display:grid;gap:8px"><h3>Batches and drop-offs</h3><div class="staff-mgr">${[
+      ...drops.sort((a, b) => (b.dropDate || "").localeCompare(a.dropDate || "")).map(d => { const sm = dropoffSummary(d.items); return `<div class="staff-row"><span><button class="linkbtn code" type="button" data-open="${d.id}">SKU ${esc(d.sku)}</button> PC Sportscards drop-off · ${d.dropDate ? fmtDay(d.dropDate) : ""}${d.batch ? ` · batch ${esc(d.batch)}` : ""}</span><span class="muted">${(d.items || []).length}${d.expected ? ` of ${d.expected}` : ""} cards · ${sm.sold + sm.paid} sold · ${(d.photos || []).length} photos</span></div>`; }),
+      ...batches.filter(b => b.cust === c.id).map(b => `<div class="staff-row"><span><span class="code">${esc(b.id)}</span> ${PLAT[b.plat]} · received ${fmtDay(b.recv)}${b.ship ? ` · shipped ${fmtDay(b.ship)}` : " · not shipped"}</span><span class="muted">${b.cards || 0} cards · ${(b.photos || []).length} photos</span></div>`),
+    ].join("")}</div></div>` : ""}
+    <div style="display:grid;gap:8px"><h3>All cards (${cards.length})</h3>${cards.length
+      ? `<div class="tbl-wrap" style="max-height:420px;overflow:auto"><table class="prev" style="min-width:620px"><thead><tr><th>SKU</th><th>Card</th><th>Status</th><th>Auction house</th><th>Price / sale</th><th>Date</th></tr></thead><tbody>${recent.slice(0, 400).map(l => `<tr><td><button class="linkbtn code" type="button" data-open="${l.id}">${esc(l.sku)}</button></td><td class="title">${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}</td><td><span class="st ${l.status}">${STAT[l.status]}</span></td><td>${PLAT[l.plat] || ""}</td><td class="num">${l.price != null ? money(l.price) : ""}</td><td class="num">${fmtDay((l.soldDate || l.added || "").slice(0, 10))}</td></tr>`).join("")}${recent.length > 400 ? `<tr><td colspan="6" class="muted">Showing the newest 400. Use “Show their cards in the list” to see all ${recent.length}.</td></tr>` : ""}</tbody></table></div>`
+      : '<div class="muted" style="font-size:13px">No cards yet.</div>'}</div>
+  </div>`);
+}
+detail.body.addEventListener("click", e => {
+  const a = e.target.dataset?.pf; if (!a || !profileCust) return;
+  const c = custById(profileCust); if (!c) return;
+  detail.close();
+  if (a === "view") { ui.cv = c.id; setMode("cust"); }
+  if (a === "edit") { $("#c-q").value = ""; renderCustList(); $("#custList").querySelector(`[data-edit="${c.id}"]`)?.click(); $("#custForm").scrollIntoView({ block: "center" }); }
+  if (a === "cards") { ["#f-q", "#f-plat", "#f-st", "#f-batch", "#f-added"].forEach(x => { $(x).value = ""; }); $("#f-cust").innerHTML = custOptions(c.id, true); $("#f-cust").value = c.id; setView("all"); $("#ledger").scrollIntoView({ block: "start" }); }
+});
 detail.body.addEventListener("submit", async e => {
   if (e.target.id !== "d-form") return;
   e.preventDefault();
@@ -783,7 +882,7 @@ function renderPayouts() {
   $("#p-body").innerHTML = rows.length ? rows.map(({ c, o }) => {
     const canMail = c.email && c.notify !== false;
     return `<tr data-c="${c.id}">
-      <td><span class="code">${esc(c.code)}</span> ${esc(c.name)}</td>
+      <td><span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button></td>
       <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}</td>
       <td class="num">${o.count}</td>
       <td style="max-width:240px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>'}</td>
@@ -963,7 +1062,7 @@ function renderBatches() {
     }
     html += `<tr data-b="${esc(b.id)}">
       <td><span class="code">${esc(b.id)}</span>${notes ? `<div class="cert" style="white-space:normal;max-width:180px">${esc(notes)}</div>` : ""}</td>
-      <td>${c ? esc(c.name) : b.cust ? "—" : "Several customers"}</td>
+      <td>${c ? `<button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button>` : b.cust ? "—" : "Several customers"}</td>
       <td><span class="chip ${b.plat}">${b.plat === "fan" ? "Fanatics" : "PC Sportscards"}</span></td>
       <td class="num">${fmtDay(b.recv)}</td>
       <td class="num">${b.ship ? fmtDay(b.ship) : '<span class="need">Not shipped</span>'}</td>
@@ -975,7 +1074,7 @@ function renderBatches() {
     const drops = cards.filter(isDropoff).sort((a, b) => (custById(a.cust)?.name || "").localeCompare(custById(b.cust)?.name || "") || (a.dropDate || "").localeCompare(b.dropDate || ""));
     drops.forEach(d => {
       const dc = custById(d.cust), sm = dropoffSummary(d.items);
-      html += `<tr class="sub"><td></td><td colspan="7"><div class="row" style="gap:10px"><button class="linkbtn code" type="button" data-open="${d.id}">SKU ${esc(d.sku)}</button><span>${dc ? esc(dc.name) : "No customer"}</span><span class="muted">dropped off ${d.dropDate ? fmtDay(d.dropDate) : "?"} · ${(d.items || []).length}${d.expected ? ` of ${d.expected}` : ""} cards · ${sm.sold + sm.paid} sold · ${(d.photos || []).length} photo${(d.photos || []).length === 1 ? "" : "s"}</span>${(d.photos || []).length ? `<span class="thumbs">${d.photos.slice(0, 3).map((p, i) => `<button class="thumb" type="button" data-ph="L:${d.id}" data-i="${i}" aria-label="Photo ${i + 1}" style="width:32px;height:32px"><img src="${p.thumb}" alt=""></button>`).join("")}</span>` : ""}</div></td></tr>`;
+      html += `<tr class="sub"><td></td><td colspan="7"><div class="row" style="gap:10px"><button class="linkbtn code" type="button" data-open="${d.id}">SKU ${esc(d.sku)}</button><span>${dc ? `<button class="linkbtn" type="button" data-cust="${dc.id}">${esc(dc.name)}</button>` : "No customer"}</span><span class="muted">dropped off ${d.dropDate ? fmtDay(d.dropDate) : "?"} · ${(d.items || []).length}${d.expected ? ` of ${d.expected}` : ""} cards · ${sm.sold + sm.paid} sold · ${(d.photos || []).length} photo${(d.photos || []).length === 1 ? "" : "s"}</span>${(d.photos || []).length ? `<span class="thumbs">${d.photos.slice(0, 3).map((p, i) => `<button class="thumb" type="button" data-ph="L:${d.id}" data-i="${i}" aria-label="Photo ${i + 1}" style="width:32px;height:32px"><img src="${p.thumb}" alt=""></button>`).join("")}</span>` : ""}</div></td></tr>`;
     });
   });
   $("#b-body").innerHTML = html || '<tr><td colspan="8"><div class="empty">No batches yet. Log one above when a customer drops off cards.</div></td></tr>';
