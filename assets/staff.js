@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105133834";
+import { db, logout } from "./firebase.js?v=20261105142203";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261105133834";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105133834";
-import { emailSend, contact } from "./firebase-config.js?v=20261105133834";
+} from "./ui.js?v=20261105142203";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105142203";
+import { emailSend, contact } from "./firebase-config.js?v=20261105142203";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -514,7 +514,7 @@ detail.body.addEventListener("submit", async e => {
   if (ok) { Object.assign(l, patch); openDropDetail(l); $("#dx-fmsg").textContent = "Saved."; }
 });
 // Other PC Sportscards cards in the same batch can share one photo.
-const photoMates = l => l.plat === "pcs" && l.batch ? S.listings.filter(x => x.id !== l.id && x.plat === "pcs" && x.batch === l.batch && x.cust === l.cust) : [];
+const photoMates = l => l.plat === "pcs" && l.batch ? S.listings.filter(x => x.id !== l.id && !isDropoff(x) && x.plat === "pcs" && x.batch === l.batch && x.cust === l.cust) : [];
 function photoSection(l) {
   const mates = photoMates(l);
   const note = isLot(l) ? "This photo covers every card in this lot." : l.plat === "fan" ? "Shows on the customer’s page next to this card." : "";
@@ -747,7 +747,7 @@ detail.body.addEventListener("click", async e => {
   if (drm != null) {
     const l = S.all.find(x => x.id === openCard); if (!l) return;
     const p = l.photos[+drm], photos = l.photos.filter((_, i) => i !== +drm);
-    const ok = await guarded($("#dx-pmsg"), async () => { await updateDoc(listingRef(l.id), { photos, updatedAt: serverTimestamp() }); try { await deleteDoc(doc(db, "photos", p.id)); } catch (err) {} return true; });
+    const ok = await guarded($("#dx-pmsg"), async () => { await updateDoc(listingRef(l.id), { photos, updatedAt: serverTimestamp() }); if (!S.batches.some(b => (b.photos || []).some(q => q.id === p.id))) { try { await deleteDoc(doc(db, "photos", p.id)); } catch (err) {} } return true; });
     if (ok) { l.photos = photos; openDropDetail(l); }
     return;
   }
@@ -909,21 +909,22 @@ function payoutEmail(c, o) {
 /* Payout email: preview, edit, approve and send from here. Sends through EmailJS when it's set up. */
 const mailBox = createModal();
 const canSend = () => !!(emailSend.serviceId && emailSend.templateId && emailSend.publicKey);
-function openMail(c, o, m) {
+function openMail(c, o, m, { title = "Payout email", photo = null, onSent = null, out = "#p-msg" } = {}) {
   mailBox.open(`<div style="display:grid;gap:12px">
-    <h2>Payout email to ${esc(c.name)}</h2>
+    <h2>${esc(title)} to ${esc(c.name)}</h2>
     <div class="f"><label>To</label><div class="code">${esc(c.email)}</div></div>
     <div class="f"><label for="pm-subj">Subject</label><input id="pm-subj" value="${esc(m.subject)}"></div>
     <div class="f"><label for="pm-body">Message</label><textarea id="pm-body" rows="14" style="font:inherit;padding:10px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box">${esc(m.body)}</textarea></div>
+    ${photo ? `<div class="f"><label>Attached photo</label><img src="${photo}" alt="Receipt photo" style="max-width:240px;border-radius:6px;border:1px solid #ddd"></div>` : ""}
     ${canSend() ? "" : '<div class="notice"><b>Sending from the app isn’t set up yet.</b><span>Until it is, “Open in email app” hands this message to your email program.</span></div>'}
     <div class="row">${canSend() ? '<button class="btn" type="button" id="pm-send">Approve and send</button>' : '<button class="btn" type="button" id="pm-open">Open in email app</button>'}<button class="btn ghost" type="button" id="pm-cancel">Cancel</button><span class="detect" id="pm-msg" role="status"></span></div>
   </div>`);
   const body = mailBox.body, val = s => $(s, body).value;
-  const logged = () => updateDoc(doc(db, "customers", c.id), { notifiedAt: now(), notifiedAmount: Math.round(o.amount * 100) / 100 });
+  const logged = onSent || (() => updateDoc(doc(db, "customers", c.id), { notifiedAt: now(), notifiedAmount: Math.round(o.amount * 100) / 100 }));
   $("#pm-cancel", body).addEventListener("click", () => mailBox.close());
   $("#pm-open", body)?.addEventListener("click", async () => {
     location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(val("#pm-subj"))}&body=${encodeURIComponent(val("#pm-body"))}`;
-    mailBox.close(); await guarded($("#p-msg"), logged); $("#p-msg").textContent = `Opened an email to ${c.email} in your email app.`;
+    mailBox.close(); await guarded($(out), logged); $(out).textContent = `Opened an email to ${c.email} in your email app.${photo ? " Attach the photo yourself; your email app can’t receive it from here." : ""}`;
   });
   $("#pm-send", body)?.addEventListener("click", async e => {
     const btn = e.target, say = t => { $("#pm-msg", body).textContent = t; };
@@ -931,10 +932,43 @@ function openMail(c, o, m) {
     try {
       const r = await fetch("https://api.emailjs.com/api/v1.0/email/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         service_id: emailSend.serviceId, template_id: emailSend.templateId, user_id: emailSend.publicKey,
-        template_params: { to_email: c.email, to_name: c.name, subject: val("#pm-subj"), message: val("#pm-body"), reply_to: contact.email } }) });
+        template_params: { to_email: c.email, to_name: c.name, subject: val("#pm-subj"), message: val("#pm-body"), reply_to: contact.email, bcc: contact.email, photo: photo || "" } }) });
       if (!r.ok) throw new Error(await r.text());
-      mailBox.close(); await guarded($("#p-msg"), logged); $("#p-msg").textContent = `Sent the payout email to ${c.name} (${c.email}).`;
+      mailBox.close(); await guarded($(out), logged); $(out).textContent = `Sent the email to ${c.name} (${c.email}).`;
     } catch (err) { console.error(err); btn.disabled = false; say("Couldn’t send it. Check your connection and try again, or use Copy message."); }
+  });
+}
+// Batch receipt: sent when a batch is logged, with the drop-off photo attached. Never mentions shipping.
+// The free EmailJS plan caps each email at 50 KB, so the photo is shrunk to fit.
+async function receiptPhoto(b) {
+  const p = (b.photos || [])[0]; if (!p) return null;
+  let src = p.thumb;
+  try { const d = await getDoc(doc(db, "photos", p.id)); if (d.exists()) src = d.data().data; } catch (e) {}
+  const img = await new Promise(res => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); setTimeout(() => res(null), 4000); i.src = src; });
+  if (!img || !img.width) return p.thumb;
+  try {
+    for (const [px, q] of [[900, .6], [750, .55], [600, .5], [480, .45]]) {
+      const k = Math.min(1, px / Math.max(img.width, img.height)), cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      const out = cv.toDataURL("image/jpeg", q);
+      if (out.length < 40000) return out;
+    }
+  } catch (e) {}
+  return p.thumb;
+}
+async function openReceipt(b) {
+  const c = custById(b.cust); if (!c?.email) return;
+  const first = (c.name || "").split(/\s+/)[0] || "there";
+  const photo = await receiptPhoto(b);
+  const body = [`Hi ${first},`, "",
+    `Thanks for consigning with Wheelhouse. This is your receipt: we received ${b.cards ? `${b.cards} card${b.cards === 1 ? "" : "s"}` : "your cards"} from you on ${fmtDay(b.recv)} (batch ${b.id}), to be sold through ${PLAT[b.plat] || "our auction partners"}.`, "",
+    photo ? "A photo of the cards you dropped off is attached for both of our records." : "", photo ? "" : null,
+    `Curating and listing can take a little while. You can follow your cards anytime at ${SITE}. Sign in (or create an account) with this email address.`, "",
+    "Thanks,", "Wheelhouse"].filter(x => x !== null).join("\n");
+  openMail(c, null, { subject: `Wheelhouse consignment receipt: batch ${b.id}`, body }, {
+    title: "Receipt email", photo, out: "#b-msg",
+    onSent: () => updateDoc(doc(db, "batches", b.id), { receiptAt: now() }),
   });
 }
 function renderPayouts() {
@@ -1210,8 +1244,19 @@ $("#bForm").addEventListener("submit", async e => {
     }]);
     ops.push(["set", doc(db, "batchNotes", id), { notes: $("#b-notes").value.trim() }]);
     await commit(ops);
-    say(`${old ? "Saved" : "Logged"} batch ${id}.`);
+    // A PC Sportscards batch is the customer's drop-off: keep one drop-off SKU in step with it.
+    const plat = $("#b-plat").value, cards = parseInt($("#b-cards").value, 10) || 0;
+    const bphotos = pending.map(p => ({ id: p.id, thumb: p.thumb, fromBatch: true }));
+    let drop = S.all.find(l => isDropoff(l) && l.batch === id && l.status !== "removed");
+    if (plat === "pcs") {
+      if (!drop) drop = await newDropoff({ cust, dropDate: recv, batch: id, expected: cards, photos: bphotos });
+      else await updateDoc(listingRef(drop.id), { cust, custEmail: email, dropDate: recv, expected: cards, title: `PC Sportscards drop-off · ${fmtDay(recv)}`,
+        photos: [...bphotos, ...(drop.photos || []).filter(p => !p.fromBatch && !bphotos.some(q => q.id === p.id))], updatedAt: serverTimestamp() });
+    }
+    say(`${old ? "Saved" : "Logged"} batch ${id}.` + (plat === "pcs" && !old ? ` Drop-off SKU ${drop.sku} is ready for its cards.` : ""));
+    const receipt = !old ? { b: { id, cust, plat, cards, recv, photos: pending.map(p => ({ id: p.id, thumb: p.thumb })) } } : null;
     resetBatchForm();
+    if (receipt && custById(cust)?.email) openReceipt(receipt.b);
   });
   $("#b-save").disabled = false;
 });
@@ -1553,14 +1598,18 @@ function planFan() {
 function pcsStatus(st) {
   st = st.toLowerCase();
   if (/received payment|paid/.test(st)) return "received";
-  if (/sold/.test(st) && !/unsold/.test(st)) return "sold";
+  if (/cancel|return/.test(st)) return "cancelled";
+  if (/sold/.test(st) && !/unsold/.test(st)) return "awaiting";
   if (/listed|active/.test(st)) return "live";
-  if (/unsold|cancel|return|ended|expired/.test(st)) return "unsold";
+  if (/unsold|ended|expired/.test(st)) return "unsold";
   return "";
 }
 const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1, 12).toISOString().slice(0, 10); };
 // PC Sportscards export → the unsorted list (meta/pcsPool), plus status updates for cards already sorted into drop-off SKUs.
-const PRANK = { live: 1, unsold: 1, sold: 2, paid: 3 };
+const PRANK = { live: 1, unsold: 1, awaiting: 2, sold: 3, paid: 4 };
+// Status moves forward only, except a sale that falls through (cancelled/returned) before the consignor is paid.
+const moves = (from, to) => from !== "cancelled" && (to === "cancelled" ? from !== "paid" : (PRANK[to] || 0) > (PRANK[from] || 0) || (from === "live" && to === "unsold"));
+const normTitle = t => (t || "").toLowerCase().replace(/\s+/g, " ").trim();
 function planPcs() {
   const m = imp.map;
   const recent = parseInt($("#i-recent").value, 10) || 0;
@@ -1574,7 +1623,7 @@ function planPcs() {
   const inPool = new Map((S.pool || []).map(x => [x.pcsId, x]));
   const asCard = new Map(S.all.filter(l => l.pcsId && !isDropoff(l)).map(l => [l.pcsId, l]));
   const seen = new Set();
-  return scan.map(({ r, listed }) => {
+  const plan = scan.map(({ r, listed }) => {
     const pcsId = g(r, "pcsId").replace(/\.0+$/, ""), title = g(r, "title");
     if (!pcsId && !title) return null;
     const label = title || `Card #${pcsId}`;
@@ -1587,15 +1636,16 @@ function planPcs() {
     const pcsPaid = isoDay(g(r, "paidDate")), soldDate = isoDay(g(r, "soldDate")) || pcsPaid;
     const price = money2(g(r, "price")), net = money2(g(r, "net"));
     const gm = title.match(/\b(PSA|SGC|BGS|CGC|TAG|HGA)\s*(\d+(?:\.\d)?|Authentic|Auth)\b/i);
-    const fresh = { pcsId, title, status, listed, soldDate: status === "sold" ? soldDate : "", pcsPaid, price: price || null, net: status === "sold" ? net : null, grade: gm ? `${gm[1].toUpperCase()} ${gm[2]}` : "" };
+    const saleish = status === "sold" || status === "awaiting" || status === "cancelled";
+    const fresh = { pcsId, title, status, listed, soldDate: saleish ? soldDate : "", pcsPaid, price: price || null, net: saleish ? net : null, grade: gm ? `${gm[1].toUpperCase()} ${gm[2]}` : "" };
     // Already sorted into a drop-off: move its status forward, never backward.
     const d = inDrop.get(pcsId);
     if (d) {
       const x = d.lot.items[d.i], patch = {};
-      if ((PRANK[status] || 0) > (PRANK[x.status] || 0) || (x.status === "live" && status === "unsold")) patch.status = status;
-      if (price && price !== x.price) patch.price = price;
-      if (status === "sold" && net && net !== x.net && x.status !== "paid") patch.net = net;
-      if (status === "sold" && soldDate && !x.soldDate) patch.soldDate = soldDate;
+      if (moves(x.status, status)) patch.status = status;
+      if (price && price !== x.price && x.status !== "cancelled") patch.price = price;
+      if (saleish && net && net !== x.net && x.status !== "paid" && x.status !== "cancelled") patch.net = net;
+      if (saleish && soldDate && !x.soldDate) patch.soldDate = soldDate;
       if (pcsPaid && !x.pcsPaid) patch.pcsPaid = pcsPaid;
       if (!Object.keys(patch).length) return { act: "skip", why: "No change", label, same: true };
       return { act: "item", lot: d.lot, i: d.i, patch, label, change: patch.status ? `${ITEM_STAT[x.status]} → ${ITEM_STAT[patch.status]}` : "sale details" };
@@ -1604,12 +1654,35 @@ function planPcs() {
     if (old) return { act: "skip", why: old.status === "removed" ? `Removed earlier (SKU ${old.sku})` : `Already a card (SKU ${old.sku})`, label, same: true };
     const p = inPool.get(pcsId);
     if (p) {
-      const changed = (PRANK[status] || 0) > (PRANK[p.status] || 0) || (p.status === "live" && status === "unsold") || (price && price !== p.price) || (status === "sold" && net !== p.net);
+      const changed = moves(p.status, status) || (price && price !== p.price) || (saleish && net !== p.net);
       return changed ? { act: "poolupd", row: { ...p, ...fresh, hidden: p.hidden || false }, label, change: "updated in the unsorted list" } : { act: "skip", why: "Already in the unsorted list", label, same: true };
     }
     if (kind === "received" && pcsPaid && pcsPaid.slice(0, 10) < cutoff) return { act: "skip", why: "Paid before the cutoff (in an earlier monthly payout)", label, early: true };
     return { act: "pool", row: fresh, label };
   }).filter(Boolean);
+  // Relists: when a sale is cancelled, PC Sportscards lists the same card again under a new card # with the exact same title.
+  // Match those up so the relist lands in the same drop-off instead of the sorting list.
+  const cancelled = [];
+  S.all.filter(l => isDropoff(l) && l.status !== "removed").forEach(l => (l.items || []).forEach((x, i) => {
+    const p = plan.find(q => q.act === "item" && q.lot.id === l.id && q.i === i);
+    const st = p?.patch.status || x.status;
+    if (st === "cancelled" && !x.relistedAs) cancelled.push({ lot: l, i, x: { ...x, ...(p?.patch || {}) } });
+  }));
+  if (cancelled.length) {
+    const fromPool = (S.pool || []).filter(r => !r.hidden).map(r => ({ row: r, pooled: true }));
+    const cands = [...plan.filter(q => q.act === "pool").map(q => ({ row: q.row, q })), ...fromPool];
+    const taken = new Set();
+    cancelled.sort((a, b) => (a.x.soldDate || "").localeCompare(b.x.soldDate || "")).forEach(c => {
+      const t = normTitle(c.x.title), after = (c.x.soldDate || c.x.listed || "").slice(0, 10);
+      const m = cands.filter(k => !taken.has(k.row.pcsId) && k.row.pcsId !== c.x.pcsId && normTitle(k.row.title) === t && (k.row.listed || "") >= after)
+        .sort((a, b) => (a.row.listed || "").localeCompare(b.row.listed || ""))[0];
+      if (!m) return;
+      taken.add(m.row.pcsId);
+      const entry = { act: "relist", lot: c.lot, i: c.i, oldId: c.x.pcsId, row: { ...m.row, relistOf: c.x.pcsId, hidden: undefined }, pooled: !!m.pooled, label: m.row.title };
+      if (m.q) Object.assign(m.q, entry); else plan.push(entry);
+    });
+  }
+  return plan;
 }
 function renderPcsImport() {
   $("#i-batchwrap").hidden = true; $("#i-pcswrap").hidden = false;
@@ -1618,18 +1691,19 @@ function renderPcsImport() {
   if (!S.hist) { $("#i-sum").textContent = "Checking for cards already in the system…"; $("#i-prev").innerHTML = ""; $("#i-go").disabled = true; return; }
   const plan = planPcs(), n = a => plan.filter(p => p.act === a).length;
   const recent = parseInt($("#i-recent").value, 10) || 0;
-  $("#i-sum").innerHTML = `Read the newest ${(recent ? Math.min(recent, imp.rows.length) : imp.rows.length).toLocaleString()} of ${imp.rows.length.toLocaleString()} rows · <span class="act-new">${n("pool")} new to sort</span> · <span class="act-upd">${n("item")} updates to sorted cards</span>${n("poolupd") ? ` · ${n("poolupd")} updates to unsorted cards` : ""} · ${plan.filter(p => p.same).length} unchanged · <span class="act-skip">${plan.filter(p => p.early).length} paid before the cutoff</span>`;
-  const order = { item: 0, pool: 1, poolupd: 2, skip: 3 };
+  const flagN = st => plan.filter(p => p.act === "item" && p.patch.status === st).length;
+  $("#i-sum").innerHTML = `Read the newest ${(recent ? Math.min(recent, imp.rows.length) : imp.rows.length).toLocaleString()} of ${imp.rows.length.toLocaleString()} rows · <span class="act-new">${n("pool")} new to sort</span> · <span class="act-upd">${n("item")} updates to sorted cards</span>${n("relist") ? ` · <span class="act-upd">${n("relist")} relisted cards matched to their drop-off</span>` : ""}${flagN("awaiting") ? ` · <span class="need">${flagN("awaiting")} sold, awaiting payment</span>` : ""}${flagN("cancelled") ? ` · <span class="need">${flagN("cancelled")} sales cancelled</span>` : ""}${n("poolupd") ? ` · ${n("poolupd")} updates to unsorted cards` : ""} · ${plan.filter(p => p.same).length} unchanged · <span class="act-skip">${plan.filter(p => p.early).length} paid before the cutoff</span>`;
+  const order = { item: 0, relist: 0, pool: 1, poolupd: 2, skip: 3 };
   $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).slice(0, 12).map(p => {
     const r = p.row;
-    const act = p.act === "pool" ? `<span class="act-new">New · to sort</span>` : p.act === "item" ? `<span class="act-upd">SKU ${esc(p.lot.sku)}: ${esc(p.change)}</span>` : p.act === "poolupd" ? `<span class="act-upd">Unsorted: updated</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
+    const act = p.act === "pool" ? `<span class="act-new">New · to sort</span>` : p.act === "item" ? `<span class="act-upd">SKU ${esc(p.lot.sku)}: ${esc(p.change)}</span>` : p.act === "relist" ? `<span class="act-upd">SKU ${esc(p.lot.sku)}: relist of PC #${esc(p.oldId)}</span>` : p.act === "poolupd" ? `<span class="act-upd">Unsorted: updated</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
     const st = r ? ITEM_STAT[r.status] : p.patch?.status ? ITEM_STAT[p.patch.status] : "";
-    const sale = r && r.status === "sold" ? `${money(r.price)}<div class="cert">${money(r.net)} after fees</div>` : "";
+    const sale = r && (r.status === "sold" || r.status === "awaiting") ? `${money(r.price)}<div class="cert">${money(r.net)} after fees</div>` : "";
     return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td>${st}</td><td class="num">${sale}</td></tr>`;
   }).join("") + (plan.length > 12 ? `<tr><td colspan="4" class="muted">…and ${(plan.length - 12).toLocaleString()} more rows</td></tr>` : "");
-  const go = n("pool") + n("item") + n("poolupd");
+  const go = n("pool") + n("item") + n("poolupd") + n("relist");
   $("#i-go").disabled = !go;
-  $("#i-go").textContent = go ? (n("pool") ? `Add ${n("pool")} to the sorting list` : "Save updates") + (n("item") ? ` and update ${n("item")} sorted cards` : "") : "Nothing new";
+  $("#i-go").textContent = go ? (n("pool") ? `Add ${n("pool")} to the sorting list` : "Save updates") + (n("item") + n("relist") ? ` and update ${n("item") + n("relist")} sorted cards` : "") : "Nothing new";
 }
 async function runPcsImport() {
   const plan = planPcs();
@@ -1637,13 +1711,19 @@ async function runPcsImport() {
   const added = [];
   plan.forEach(p => { if (p.act === "pool") { pool.set(p.row.pcsId, p.row); added.push(p.row.pcsId); } if (p.act === "poolupd") pool.set(p.row.pcsId, p.row); });
   const byLot = new Map();
-  plan.filter(p => p.act === "item").forEach(p => { const e = byLot.get(p.lot.id) || byLot.set(p.lot.id, { lot: p.lot, items: p.lot.items.map(x => ({ ...x })) }).get(p.lot.id); Object.assign(e.items[p.i], p.patch); });
+  const entry = p => byLot.get(p.lot.id) || byLot.set(p.lot.id, { lot: p.lot, items: p.lot.items.map(x => ({ ...x })) }).get(p.lot.id);
+  plan.filter(p => p.act === "item").forEach(p => Object.assign(entry(p).items[p.i], p.patch));
+  plan.filter(p => p.act === "relist").forEach(p => {
+    const e = entry(p); e.items[p.i].relistedAs = p.row.pcsId;
+    const { hidden, ...row } = p.row; e.items.push(row);
+    if (p.pooled) pool.delete(p.row.pcsId);
+  });
   const ops = [...byLot.values()].map(e => upd(e.lot.id, dropPatch(e.items)));
   const updated = [...byLot.values()].map(e => ({ id: e.lot.id, before: { items: e.lot.items, status: e.lot.status, price: e.lot.price ?? null, lotCount: e.lot.lotCount ?? null } }));
   for (let i = 0; i < ops.length; i += 400) await commit(ops.slice(i, i + 400));
-  if (added.length || plan.some(p => p.act === "poolupd")) await savePool([...pool.values()]);
+  if (added.length || plan.some(p => p.act === "poolupd" || (p.act === "relist" && p.pooled))) await savePool([...pool.values()]);
   await logImport({ kind: "pcs", file: imp.file, created: [], updated, poolAdded: added });
-  return { added: added.length, lots: byLot.size, items: plan.filter(p => p.act === "item").length };
+  return { added: added.length, lots: byLot.size, items: plan.filter(p => p.act === "item" || p.act === "relist").length };
 }
 function renderFanImport() {
   $("#i-batchwrap").hidden = false;

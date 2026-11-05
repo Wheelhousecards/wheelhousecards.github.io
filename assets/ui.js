@@ -40,20 +40,30 @@ export const cardPayout = (l, c) => l.payout != null ? l.payout : (l.net != null
    PC Sportscards status: live, sold (PC Sportscards sold it, Wheelhouse hasn't paid the consignor yet),
    paid (paid out to the consignor) or unsold. */
 export const isDropoff = l => !!(l && l.kind === "dropoff");
-export const ITEM_STAT = { live: "Listed", sold: "Sold", paid: "Paid out", unsold: "Unsold" };
-// PC Sportscards starts each eBay title with its card #, so searching that number finds the exact listing.
+// awaiting: sold on eBay, PC Sportscards hasn't received the buyer's payment yet (not owed to the consignor yet).
+// sold: PC Sportscards received payment, so Wheelhouse owes the consignor. cancelled: the sale fell through (unpaid or returned)
+// and PC Sportscards relists it under a new card #; relistedAs points to the new listing.
+export const ITEM_STAT = { live: "Listed", awaiting: "Awaiting payment", sold: "Sold", paid: "Paid out", unsold: "Unsold", cancelled: "Sale cancelled" };
+export const CUST_ITEM_STAT = { live: "Listed", awaiting: "Sold · payment pending", sold: "Sold", paid: "Paid out", unsold: "Unsold", cancelled: "Being relisted" };
+// What the customer sees: a cancelled sale that's been relisted shows only as the new listing.
+export const custItems = items => (items || []).filter(x => !(x.status === "cancelled" && x.relistedAs));
+// PC Sportscards' eBay seller name. Once set, "Find on eBay" only searches their listings.
+export const PCS_SELLER = "";
+// Searches eBay for the card's exact PC Sportscards title (limited to their store once PCS_SELLER is set).
 // Sold cards search eBay's sold listings instead of live ones.
 export function ebayFind(x) {
-  const q = encodeURIComponent(x.pcsId || x.title || "");
-  const done = x.status === "sold" || x.status === "paid";
-  return `https://www.ebay.com/sch/i.html?_nkw=${q}${done ? "&LH_Sold=1&LH_Complete=1" : ""}`;
+  const q = encodeURIComponent(x.title || x.pcsId || "");
+  const done = x.status === "sold" || x.status === "paid" || x.status === "awaiting";
+  return `https://www.ebay.com/sch/i.html?_nkw=${q}${PCS_SELLER ? `&_ssn=${encodeURIComponent(PCS_SELLER)}` : ""}${done ? "&LH_Sold=1&LH_Complete=1" : ""}`;
 }
 export const itemShare = (x, c) => (x.net != null ? x.net : (x.price || 0)) * (x.split != null && x.split !== "" ? +x.split : splitOf(c, "pcsRate")) / 100;
 export function dropoffSummary(items = []) {
   const n = k => items.filter(x => x.status === k).length;
   const soldItems = items.filter(x => x.status === "sold" || x.status === "paid");
-  const status = !items.length ? "curating" : n("live") ? "live" : n("sold") ? "sold" : n("paid") ? "paid" : "unsold";
-  return { status, live: n("live"), sold: n("sold"), paid: n("paid"), unsold: n("unsold"), gross: soldItems.reduce((s, x) => s + (x.price || 0), 0), net: soldItems.reduce((s, x) => s + (x.net || 0), 0) };
+  const open = n("cancelled") - items.filter(x => x.status === "cancelled" && x.relistedAs).length;
+  const status = !items.length ? "curating" : n("live") || open ? "live" : n("awaiting") || n("sold") ? "sold" : n("paid") ? "paid" : "unsold";
+  return { status, live: n("live"), awaiting: n("awaiting"), sold: n("sold"), paid: n("paid"), unsold: n("unsold"), cancelled: n("cancelled"), relisting: open,
+    cards: items.length - (n("cancelled") - open), gross: soldItems.reduce((s, x) => s + (x.price || 0), 0), net: soldItems.reduce((s, x) => s + (x.net || 0), 0) };
 }
 // What Wheelhouse owes this consignor right now: sold-but-unpaid cards at their rate, plus any carried-over balance.
 export function owedFor(c, listings) {
@@ -131,7 +141,8 @@ export function lotLine(l) {
   const n = l.items?.length || l.lotCount || 0;
   if (isDropoff(l)) {
     const sm = dropoffSummary(l.items);
-    return [l.dropDate ? `Dropped off ${fmtDay(l.dropDate)}` : "", n ? `${n} card${n === 1 ? "" : "s"}` : (l.expected ? `${l.expected} cards, not itemized yet` : ""), sm.sold + sm.paid ? `${sm.sold + sm.paid} sold` : "", sm.live ? `${sm.live} listed` : ""].filter(Boolean).join(" · ");
+    const k = sm.cards;
+    return [l.dropDate ? `Dropped off ${fmtDay(l.dropDate)}` : "", k ? `${k} card${k === 1 ? "" : "s"}` : (l.expected ? `${l.expected} cards, not itemized yet` : ""), sm.sold + sm.paid ? `${sm.sold + sm.paid} sold` : "", sm.awaiting ? `${sm.awaiting} payment pending` : "", sm.live ? `${sm.live} listed` : ""].filter(Boolean).join(" · ");
   }
   return [n ? `${n} card${n === 1 ? "" : "s"}` : "", l.period ? (l.plat === "pcs" ? `${l.period} payout` : l.period) : ""].filter(Boolean).join(" · ");
 }
@@ -156,10 +167,11 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
   ];
   let lot = "";
   if (isDropoff(l)) {
-    const items = l.items || [], sm = dropoffSummary(items);
-    const head = `Cards in this drop-off (${items.length}${l.expected && l.expected !== items.length ? ` of ${l.expected} dropped off` : ""})`;
+    const items = staff ? l.items || [] : custItems(l.items), sm = dropoffSummary(l.items || []);
+    const ST = staff ? ITEM_STAT : CUST_ITEM_STAT;
+    const head = `Cards in this drop-off (${sm.cards}${l.expected && l.expected !== sm.cards ? ` of ${l.expected} dropped off` : ""})`;
     lot = `<div style="display:grid;gap:8px"><h3>${head}</h3>` + (items.length
-      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${x.pcsId ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status}">${ITEM_STAT[x.status] || esc(x.status)}</span></td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? money(itemShare(x, c)) : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
+      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${x.pcsId ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status === "awaiting" ? "sold" : x.status === "cancelled" ? "unsold" : x.status}">${ST[x.status] || esc(x.status)}</span>${staff && x.status === "awaiting" ? '<div class="flag">Waiting on buyer payment</div>' : ""}${staff && x.status === "cancelled" ? `<div class="flag">${x.relistedAs ? `Relisted as PC #${esc(x.relistedAs)}` : "Watch for the relist"}</div>` : ""}${staff && x.relistOf ? `<div class="cert">Relist of PC #${esc(x.relistOf)}</div>` : ""}</td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price && (staff || x.status !== "cancelled") ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? money(itemShare(x, c)) : x.status === "awaiting" ? '<span class="muted">Pending</span>' : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold${sm.awaiting ? ` · ${sm.awaiting} pending` : ""}</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
       : `<div class="empty" style="padding:16px">${staff ? "No cards in this drop-off yet. Select them in the PC Sportscards sorting list and add them here." : "We’re itemizing the cards from this drop-off. They’ll show up here once PC Sportscards lists them."}</div>`) + `</div>`;
   } else if (isLot(l)) {
     const items = l.items || [];
@@ -240,10 +252,11 @@ export function createLightbox(getBatch, loadFull) {
 /* ---------- batch progress, as the customer sees it ---------- */
 // Fanatics and PC Sportscards can take a long time to curate and list a shipment,
 // so a shipped batch with cards still unlisted gets a reassuring status instead of looking empty.
+// Customers never see whether or when a batch shipped.
 export function batchStage(b, cards) {
-  const sent = b.cards || 0, listed = cards.filter(l => l.status !== "curating").length, where = PLAT[b.plat];
-  if (!b.ship) return { k: "prep", title: "Getting ready to ship", text: `Your cards are safe at Wheelhouse. We’re preparing this batch to send to ${where}.` };
-  if (!listed) return { k: "curating", title: `Being curated by ${where}`, text: `We shipped your cards on ${fmtDay(b.ship)}. ${where} is reviewing and photographing them before they go up for sale, which can take a while. Your cards will show up here as soon as they’re listed.` };
+  const sent = b.cards || 0, where = PLAT[b.plat];
+  const listed = cards.reduce((t, l) => t + (isDropoff(l) ? dropoffSummary(l.items).cards : l.status !== "curating" ? 1 : 0), 0);
+  if (!listed) return { k: "curating", title: `Being curated for ${where}`, text: `We received your cards and they’re on their way to being listed on ${where}. Curating and photographing every card can take a while. Your cards will show up here as soon as they’re listed.` };
   if (sent && listed < sent) return { k: "partial", title: `${sent - listed} still being curated`, text: `${listed} of ${sent} cards are listed. ${where} is still working through the rest, and they’ll show up here as they’re listed.` };
   return null;
 }
@@ -318,24 +331,27 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
       const bl = batches.filter(b => !fp || b.plat === fp).sort((a, b) => (b.recv || "").localeCompare(a.recv || ""));
       q("cards").innerHTML = bl.length ? bl.map(b => {
         const cards = mine.filter(l => l.batch === b.id), lv = cards.filter(l => l.status === "live"), sold = cards.filter(isSold);
+        const nListed = cards.reduce((t, l) => t + (isDropoff(l) ? dropoffSummary(l.items).cards : l.status !== "curating" ? 1 : 0), 0);
+        const nSold = cards.reduce((t, l) => t + (isDropoff(l) ? (l.items || []).filter(x => ["awaiting", "sold", "paid"].includes(x.status)).length : isSold(l) ? 1 : 0), 0);
+        const nLive = cards.reduce((t, l) => t + (isDropoff(l) ? (l.items || []).filter(x => x.status === "live").length : l.status === "live" ? 1 : 0), 0);
         return `<article class="card">
           <div style="display:grid;gap:8px;min-width:0">
             <div class="t">Batch <span class="code">${esc(b.id)}</span> <span class="chip ${b.plat}">${PLAT[b.plat]}</span></div>
-            <div class="meta"><span>Received ${fmtDay(b.recv)}</span><span>${b.ship ? "Shipped " + fmtDay(b.ship) : '<span class="need">Not shipped yet</span>'}</span><span>${b.cards || cards.length} cards sent · ${cards.length} listed · ${sold.length} sold</span></div>
+            <div class="meta"><span>Received ${fmtDay(b.recv)}</span><span>${b.cards || cards.length} cards · ${nListed} listed · ${nSold} sold</span></div>
             ${stageHtml(batchStage(b, cards))}
             ${thumbsHtml(b, 8)}
           </div>
-          <div class="right"><span class="sub">Listed now</span><span class="amt">${lv.length}</span><span class="sub">${sold.length} sold</span></div>
+          <div class="right"><span class="sub">Listed now</span><span class="amt">${nLive}</span><span class="sub">${nSold} sold</span></div>
         </article>`;
       }).join("") : '<div class="empty">No batches logged yet.</div>';
       return;
     }
     // Shipped batches that aren't fully listed yet, summarized above the card list.
-    const waiting = batches.filter(b => b.ship && (!fp || b.plat === fp)).map(b => {
-      const inB = mine.filter(l => l.batch === b.id), n = inB.filter(l => l.status !== "curating").length, s = batchStage(b, inB);
+    const waiting = batches.filter(b => !fp || b.plat === fp).map(b => {
+      const inB = mine.filter(l => l.batch === b.id), n = inB.reduce((t, l) => t + (isDropoff(l) ? dropoffSummary(l.items).cards : l.status !== "curating" ? 1 : 0), 0), s = batchStage(b, inB);
       return s ? { b, s, left: b.cards ? Math.max(0, b.cards - n) : null } : null;
     }).filter(Boolean);
-    const prep = batches.filter(b => !b.ship && (!fp || b.plat === fp));
+    const prep = [];
     // Cards entered but not listed yet that aren't covered by a batch line above.
     const loose = mine.filter(l => l.status === "curating" && (!fp || l.plat === fp) && !waiting.some(x => x.b.id === l.batch) && !prep.some(b => b.id === l.batch));
     const looseBy = Object.keys(PLAT).map(k => [k, loose.filter(l => l.plat === k).length]).filter(([, n]) => n);
@@ -343,7 +359,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
     if (tab !== "sold" && (waiting.length || prep.length || loose.length)) {
       const lines = [
         ...looseBy.map(([k, n]) => `${n} card${n === 1 ? " is" : "s are"} being curated by ${PLAT[k]}.`),
-        ...waiting.map(({ b, left }) => `${left != null ? `${left} card${left === 1 ? "" : "s"}` : "Cards"} from batch <span class="code">${esc(b.id)}</span> ${left === 1 ? "is" : "are"} being curated by ${PLAT[b.plat]} (shipped ${fmtDay(b.ship)}).`),
+        ...waiting.map(({ b, left }) => `${left != null ? `${left} card${left === 1 ? "" : "s"}` : "Cards"} from batch <span class="code">${esc(b.id)}</span> (received ${fmtDay(b.recv)}) ${left === 1 ? "is" : "are"} being curated for ${PLAT[b.plat]}.`),
         ...prep.map(b => `Batch <span class="code">${esc(b.id)}</span> is at Wheelhouse getting ready to ship to ${PLAT[b.plat]}.`),
       ];
       banner = `<div class="notice curating"><b>Some of your cards aren’t listed yet</b><span>That’s normal. ${waiting.length || loose.length ? "Fanatics Collect and PC Sportscards review every card before listing it, which can take a while. " : ""}They’ll show up here as soon as they go live.${loose.length ? " You can see them under Everything." : ""}</span><ul>${lines.map(t => `<li>${t}</li>`).join("")}</ul></div>`;
@@ -355,11 +371,12 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
       });
     q("cards").innerHTML = banner + (list.length ? list.map(l => {
       const tl = l.format === "auction" && l.status === "live" ? timeLeft(l.ends) : "";
-      let label, sub, recv = null;
+      let label, sub, recv = null, sub2 = "";
       if (isDropoff(l)) {
         const sm = dropoffSummary(l.items), share = (l.items || []).filter(x => x.status === "sold" || x.status === "paid").reduce((t, x) => t + itemShare(x, c), 0);
         label = sm.sold + sm.paid ? "Sold so far" : "PC Sportscards";
-        sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `${gets} ${money(share)}` : `${sm.live} listed on eBay`;
+        if (staff && (sm.awaiting || sm.relisting)) sub2 = [sm.awaiting ? `${sm.awaiting} awaiting payment` : "", sm.relisting ? `${sm.relisting} to be relisted` : ""].filter(Boolean).join(" · ");
+        sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `${gets} ${money(share)}` : sm.awaiting ? `${sm.awaiting} sold, payment pending` : `${sm.live + sm.relisting} listed on eBay`;
         if (sm.sold + sm.paid) recv = share;
         l = { ...l, price: sm.sold + sm.paid ? sm.gross : null };
       }
@@ -373,7 +390,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
           <div class="t">${esc(l.title)}</div>
           <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
         </div></div>
-        <div class="right"><span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>${recv != null ? `<span class="sub" style="margin-top:6px">${gets}</span><span class="amt recv">${money(recv)}</span>` : ""}<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span></div>
+        <div class="right"><span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>${recv != null ? `<span class="sub" style="margin-top:6px">${gets}</span><span class="amt recv">${money(recv)}</span>` : ""}<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}</div>
       </article>`;
     }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
   }
