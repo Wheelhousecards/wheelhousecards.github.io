@@ -18,7 +18,7 @@
 @font-face{font-family:"BuiltTitling";src:url("https://wheelhousecards.com/wp-content/uploads/2023/11/BuiltTitlingRg-Regular-400.ttf") format("truetype");font-weight:400 600;font-display:swap}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.45}
-.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1560px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 header{background:var(--surface);border-bottom:4px solid var(--gold);box-shadow:0 1px 0 var(--line)}
 header .wrap{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between;padding-block:10px}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
@@ -198,3 +198,8 @@ tr.grp td{background:var(--gold-soft)}
 input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
 input.auction{width:96px;padding:4px 6px;font:500 12.5px var(--mono);text-transform:uppercase}
 input.auction::placeholder{text-transform:none;font-family:var(--body)}
+
+/* wider card list: keep the Status column in view */
+#ledger table{min-width:1180px}
+#ledger td.title{min-width:200px;max-width:340px}
+#ledger td select[data-f="status"]{min-width:118px}
