@@ -390,7 +390,9 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
           <div class="t">${esc(l.title)}</div>
           <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
         </div></div>
-        <div class="right"><span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>${recv != null ? `<span class="sub" style="margin-top:6px">${gets}</span><span class="amt recv">${money(recv)}</span>` : ""}<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}</div>
+        <div class="right">${recv != null
+          ? `<span class="sub">${gets}</span><span class="amt recv">${money(recv)}</span><span class="soldfor">${isDropoff(l) ? "Sold so far" : "Sold for"} ${money(l.price)}</span>`
+          : `<span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>`}<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}</div>
       </article>`;
     }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
   }

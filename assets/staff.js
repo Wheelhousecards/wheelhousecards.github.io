@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105142203";
+import { db, logout } from "./firebase.js?v=20261105154054";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261105142203";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105142203";
-import { emailSend, contact } from "./firebase-config.js?v=20261105142203";
+} from "./ui.js?v=20261105154054";
+import { setupGate, gateMarkup } from "./gate.js?v=20261105154054";
+import { emailSend, contact } from "./firebase-config.js?v=20261105154054";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -227,7 +227,7 @@ function renderCustList() {
   $("#custList").innerHTML = list.length ? list.map(c => {
     const k = cnt.get(c.id) || { n: 0, live: 0 }, live = k.live;
     const tot = S.hist ? `${live} live / ${k.n} total` : `${live} live / ${k.n} in play`;
-    return `<div class="cust"><span class="code">${esc(c.code)}</span><div style="min-width:0"><div style="font-weight:600"><button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button></div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${esc(c.email || "No email")} · ${esc(c.phone || "No phone")}</div><div class="muted" style="font-size:12px">${c.rate ?? 85}% payout · ${tot}${c.payable ? ` · <span class="need">${money(c.payable)} carried over</span>` : ""}</div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">No payout method</span>'}${c.notify === false ? " · payout emails off" : ""}${c.payNote ? ` · ${esc(c.payNote)}` : ""}</div></div><div class="row" style="gap:6px"><button class="btn ghost sm" type="button" data-edit="${c.id}">Edit</button><button class="btn ghost sm" type="button" data-view="${c.id}">View</button></div></div>`;
+    return `<div class="cust"><span class="code">${esc(c.code)}</span><div style="min-width:0"><div style="font-weight:600"><button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button></div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${esc(c.email || "No email")} · ${esc(c.phone || "No phone")}</div><div class="muted" style="font-size:12px">${c.rate ?? 85}% payout · ${tot}${c.payable ? ` · <span class="need">${money(c.payable)} carried over</span>` : ""}</div><div class="muted" style="font-size:12px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">No payout method</span>'}${c.payNote ? ` · ${esc(c.payNote)}` : ""}</div></div><div class="row" style="gap:6px"><button class="btn ghost sm" type="button" data-edit="${c.id}">Edit</button><button class="btn ghost sm" type="button" data-view="${c.id}">View</button></div></div>`;
   }).join("") : `<div class="empty">${S.customers.length ? "No consignors match that search." : "No consignors yet. Add one below."}</div>`;
 }
 
@@ -386,7 +386,7 @@ function readSplits() {
   return out;
 }
 function resetCustForm() {
-  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; setSplits(null); $("#c-notify").checked = true; syncPayHint();
+  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; setSplits(null); syncPayHint();
   $("#c-save").textContent = "Add consignor"; $("#c-cancel").hidden = true;
 }
 $("#c-phone").addEventListener("blur", e => { e.target.value = fmtPhone(e.target.value); });
@@ -406,7 +406,7 @@ $("#custForm").addEventListener("submit", async e => {
   if (payMethod === "paypal" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payTo)) return say("Enter the email address on their PayPal account.");
   if (payMethod === "check" && !mailing) return say("Enter a mailing address for their checks.");
   const pv = parseFloat($("#c-payable").value), payable = isNaN(pv) || pv < 0 ? 0 : Math.round(pv * 100) / 100;
-  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, fanHi: sp.fanHi, fanLo: sp.fanLo, pcsRate: sp.pcsRate, notify: $("#c-notify").checked };
+  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, fanHi: sp.fanHi, fanLo: sp.fanLo, pcsRate: sp.pcsRate };
   $("#c-save").disabled = true;
   await guarded($("#c-msg"), async () => {
     if (editingCust) {
@@ -435,7 +435,7 @@ $("#custList").addEventListener("click", e => {
   if (ed) {
     const c = custById(ed); editingCust = ed;
     $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; setSplits(c);
-    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; $("#c-notify").checked = c.notify !== false; syncPayHint();
+    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; syncPayHint();
     $("#c-save").textContent = `Save ${c.code}`; $("#c-cancel").hidden = false; $("#c-msg").textContent = ""; $("#c-name").focus();
   }
 });
@@ -618,7 +618,6 @@ function renderProfile(c, cards) {
         ${row("Splits", esc(splitLine(c)))}
         ${row("Paid by", payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>')}
         ${row("Mailing address", esc(c.mailing || ""))}
-        ${row("Payout emails", c.notify === false ? "Off" : "On")}
         ${row("Last emailed", c.notifiedAt ? `${fmtDay(c.notifiedAt.slice(0, 10))}${c.notifiedAmount != null ? ` (${money(c.notifiedAmount)})` : ""}` : "")}
         ${row("Old-system balance", c.balance ? money(c.balance) : "")}
         ${row("Notes", esc(c.payNote || ""))}
@@ -975,14 +974,14 @@ function renderPayouts() {
   const rows = S.customers.map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004).sort((a, b) => b.o.amount - a.o.amount);
   $("#p-total").textContent = rows.length ? `${money(rows.reduce((s, x) => s + x.o.amount, 0))} owed to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
   $("#p-body").innerHTML = rows.length ? rows.map(({ c, o }) => {
-    const canMail = c.email && c.notify !== false;
+    const canMail = !!c.email;
     return `<tr data-c="${c.id}">
       <td><span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button></td>
       <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}</td>
       <td class="num">${o.count}</td>
       <td style="max-width:240px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>'}</td>
       <td class="num">${c.notifiedAt ? fmtDay(c.notifiedAt.slice(0, 10)) + (c.notifiedAmount != null && Math.abs(c.notifiedAmount - o.amount) > 0.004 ? `<div class="cert">was ${money(c.notifiedAmount)}</div>` : "") : '<span class="muted">Not yet</span>'}</td>
-      <td><div class="row" style="gap:6px;flex-wrap:nowrap">${canMail ? `<a class="btn ghost sm" data-pa="mail" href="#">Email</a><button class="btn ghost sm" type="button" data-pa="copy">Copy message</button>` : `<span class="muted" style="font-size:12px">${c.email ? "Payout emails off" : "No email"}</span>`}<button class="btn sm" type="button" data-pa="paid">${paidArm === c.id ? `Confirm ${money(o.amount)} paid` : "Mark paid"}</button></div></td>
+      <td><div class="row" style="gap:6px;flex-wrap:nowrap">${canMail ? `<a class="btn ghost sm" data-pa="mail" href="#">Email</a><button class="btn ghost sm" type="button" data-pa="copy">Copy message</button>` : `<span class="muted" style="font-size:12px">No email on file</span>`}<button class="btn sm" type="button" data-pa="paid">${paidArm === c.id ? `Confirm ${money(o.amount)} paid` : "Mark paid"}</button></div></td>
     </tr>`;
   }).join("") : '<tr><td colspan="6"><div class="empty">Nobody is owed a payout right now. Cards marked Sold show up here.</div></td></tr>';
 }
