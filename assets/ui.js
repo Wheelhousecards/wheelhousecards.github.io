@@ -1,6 +1,7 @@
 // Shared helpers and the customer dashboard, used by both the customer portal and the staff app.
 
 export const $ = (s, r = document) => r.querySelector(s);
+export const CONTACT_EMAIL = "consignment@wheelhousecards.com";
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const money = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
 export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards", goldin: "Goldin", shibe: "Shibe Sports", other: "Other" };
@@ -315,7 +316,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
     if (!c) { q("name").textContent = "No account"; q("stats").innerHTML = ""; q("cards").innerHTML = '<div class="empty">No consignor selected.</div>'; return; }
     q("name").textContent = c.name;
     const pl = payLine(c);
-    q("contact").innerHTML = `<span class="code">${esc(c.code)}</span> · ${esc(c.email || "No email on file")} · ${esc(c.phone || "No phone on file")}<br>${pl ? `Payouts go by ${esc(pl)}` : "Payout method not set yet. Tell us how you’d like to be paid."}`;
+    q("contact").innerHTML = `<span class="code">${esc(c.code)}</span> · ${esc(c.email || "No email on file")} · ${esc(c.phone || "No phone on file")}<br>${pl ? `Payouts go by ${esc(pl)}` : `Payout method not set yet. Tell us how you’d like to be paid <a href="mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("My payout method")}">here</a>.`}`;
     const mine = listings.filter(l => l.status !== "removed");
     const live = mine.filter(l => l.status === "live"), liveVal = live.reduce((s, l) => s + (l.price || 0), 0);
     const thirty = Date.now() - 30 * 864e5, sold30 = mine.filter(l => isSold(l) && new Date(l.soldDate || 0) > thirty);
@@ -325,8 +326,8 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
     q("stats").innerHTML = [
       ["Live now", live.length, `${live.filter(l => l.plat === "fan").length} Fanatics · ${live.filter(l => l.plat === "pcs").length} PC Sportscards`],
       ["Sold, last 30 days", sold30.length, money(sold30.reduce((s, l) => s + (l.price || 0), 0)) + " gross"],
-      ["Payout pending", money(owed), (staff ? splitLine(c) : "Sold cards not paid out yet") + (c.payable ? ` · includes ${money(c.payable)} carried over` : "") + (lastPaid ? ` · last paid ${money(lastPaid.amount)} on ${fmtDay(lastPaid.date)}` : "") + (ending ? ` · ${ending} ending today` : "")],
-    ].map(([k, v, s]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${s}</span></div>`).join("");
+      ["Payout pending", money(owed), ""],
+    ].map(([k, v, s]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span>${s ? `<span class="s">${s}</span>` : ""}</div>`).join("");
 
     const fp = q("plat").value;
     if (tab === "batches") {
