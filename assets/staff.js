@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106160636";
+import { db, logout } from "./firebase.js?v=20261106171612";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106160636";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106160636";
-import { emailSend, contact } from "./firebase-config.js?v=20261106160636";
+} from "./ui.js?v=20261106171612";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106171612";
+import { emailSend, contact } from "./firebase-config.js?v=20261106171612";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -348,7 +348,7 @@ $("#a-url").addEventListener("input", e => {
   if (d && d.plat === "pcs") $("#a-format").value = "auction";
 });
 $("#a-sku").addEventListener("input", e => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); if (e.target.value) e.target.dataset.manual = "1"; else delete e.target.dataset.manual; });
-$("#a-sku").addEventListener("blur", e => { if (e.target.value) e.target.value = pad6(e.target.value); });
+$("#a-sku").addEventListener("blur", e => { if (e.target.value) e.target.value = pad6(e.target.value); else { delete e.target.dataset.manual; e.target.value = nextSku(); } });
 $("#a-grade").addEventListener("input", e => { const raw = normGrade(e.target.value) === "Ungraded"; $("#a-cert").placeholder = raw ? "Optional if ungraded" : "Cert number"; });
 $("#a-plat").addEventListener("change", e => { if (e.target.value === "pcs") $("#a-format").value = "auction"; if (e.target.value === "store") $("#a-format").value = "bin"; });
 $("#a-batch").addEventListener("change", e => { const b = batchById(e.target.value); if (b && !$("#a-cust").value) $("#a-cust").value = b.cust; });
@@ -384,6 +384,8 @@ $("#addForm").addEventListener("submit", async e => {
     });
     ["#a-url", "#a-title", "#a-grade", "#a-cert", "#a-price"].forEach(s => { $(s).value = ""; });
     delete $("#a-sku").dataset.manual;
+    // Show the next free SKU right away (the new card may not be in the list yet).
+    $("#a-sku").value = pad6(Math.max(parseInt(nextSku(), 10), parseInt(sku, 10) + 1));
     say(`Added as SKU ${sku}. It shows on ${custById(cust).name}’s page as ${url || plat === "store" ? "Live" : "Being curated"}.`);
   });
   $("#a-save").disabled = false;
