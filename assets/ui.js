@@ -37,7 +37,12 @@ export function cardSplit(l, c) {
   if (l.plat === "pcs") return splitOf(c, "pcsRate");
   return splitOf(c, "rate");
 }
-export const cardPayout = (l, c) => { if (l.payout != null) return l.payout; const p = cardSplit(l, c); return p == null ? null : (l.net != null ? l.net : (l.price || 0)) * p / 100; };
+// Fanatics Collect charges a $5 service fee on every ungraded card (entered as Ungraded, or "CGC AUTH" in the title).
+// It comes off the sale price before the split.
+export const FAN_RAW_FEE = 5;
+export const isUngraded = l => !l.grade || /ungraded|cgc\s*auth/i.test(l.grade) || /cgc\s*auth/i.test(l.title || "");
+export const cardFee = l => l.plat === "fan" && isUngraded(l) && l.net == null ? FAN_RAW_FEE : 0;
+export const cardPayout = (l, c) => { if (l.payout != null) return l.payout; const p = cardSplit(l, c); return p == null ? null : Math.max(0, (l.net != null ? l.net : (l.price || 0)) - cardFee(l)) * p / 100; };
 const has = v => v != null && v !== "" && !isNaN(+v);
 // money for a share that may not be known yet
 export const shareText = (v, staff) => v == null ? (staff ? '<span class="need">Set PC %</span>' : '<span class="muted">Pending</span>') : money(v);
@@ -172,7 +177,7 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     ...(l.batch ? [["Batch", `<span class="code">${esc(l.batch)}</span>`]] : []),
     ...(l.added ? [["Added", fmtLong(l.added)]] : []),
     ...(l.status === "live" ? [[l.format === "bin" ? "Asking price" : "Current bid", money(l.price)]] : []),
-    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), [staff ? "Consignor portion" : "Your share", shareText(cardPayout(l, c), staff) + (staff && l.payout == null && cardSplit(l, c) != null ? ` (${cardSplit(l, c)}%${l.split != null && l.split !== "" ? ", set for this card" : ""})` : "")]] : []),
+    ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), ...(cardFee(l) && l.payout == null ? [["Fanatics ungraded service fee", "−" + money(cardFee(l))]] : []), [staff ? "Consignor portion" : "Your share", shareText(cardPayout(l, c), staff) + (staff && l.payout == null && cardSplit(l, c) != null ? ` (${cardSplit(l, c)}%${l.split != null && l.split !== "" ? ", set for this card" : ""})` : "")]] : []),
     ...(l.pcsId ? [["PC Sportscards card #", `<span class="code">${esc(l.pcsId)}</span>`]] : []),
     ...(l.item ? [["eBay / listing #", `<span class="code">${esc(l.item)}</span>`]] : []),
     ...(l.url ? [["Listing", `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open on ${PLAT[l.plat] || "the site"}</a>`]] : []),
