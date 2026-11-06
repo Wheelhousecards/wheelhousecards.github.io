@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106120202";
+import { db, logout } from "./firebase.js?v=20261106131351";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106120202";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106120202";
-import { emailSend, contact } from "./firebase-config.js?v=20261106120202";
+} from "./ui.js?v=20261106131351";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106131351";
+import { emailSend, contact } from "./firebase-config.js?v=20261106131351";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -350,7 +350,7 @@ $("#a-url").addEventListener("input", e => {
 $("#a-sku").addEventListener("input", e => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); if (e.target.value) e.target.dataset.manual = "1"; else delete e.target.dataset.manual; });
 $("#a-sku").addEventListener("blur", e => { if (e.target.value) e.target.value = pad6(e.target.value); });
 $("#a-grade").addEventListener("input", e => { const raw = normGrade(e.target.value) === "Ungraded"; $("#a-cert").placeholder = raw ? "Optional if ungraded" : "Cert number"; });
-$("#a-plat").addEventListener("change", e => { if (e.target.value === "pcs") $("#a-format").value = "auction"; });
+$("#a-plat").addEventListener("change", e => { if (e.target.value === "pcs") $("#a-format").value = "auction"; if (e.target.value === "store") $("#a-format").value = "bin"; });
 $("#a-batch").addEventListener("change", e => { const b = batchById(e.target.value); if (b && !$("#a-cust").value) $("#a-cust").value = b.cust; });
 $("#addForm").addEventListener("submit", async e => {
   e.preventDefault();
@@ -380,11 +380,11 @@ $("#addForm").addEventListener("submit", async e => {
     await setDoc(doc(col("listings")), {
       sku, cust, custEmail: emailOf(cust), batch: $("#a-batch").value || "", plat, url, item: d ? d.item : "", title, grade, cert,
       format: $("#a-format").value, price: isNaN(p) ? null : p, ends: endsFor(period, { plat }), ...(period ? { period } : {}),
-      status: url ? "live" : "curating", soldDate: "", added: now(), addedBy: me, updatedAt: serverTimestamp()
+      status: url || plat === "store" ? "live" : "curating", soldDate: "", added: now(), addedBy: me, updatedAt: serverTimestamp()
     });
     ["#a-url", "#a-title", "#a-grade", "#a-cert", "#a-price"].forEach(s => { $(s).value = ""; });
     delete $("#a-sku").dataset.manual;
-    say(`Added as SKU ${sku}. It shows on ${custById(cust).name}’s page as ${url ? "Live" : "Being curated"}.`);
+    say(`Added as SKU ${sku}. It shows on ${custById(cust).name}’s page as ${url || plat === "store" ? "Live" : "Being curated"}.`);
   });
   $("#a-save").disabled = false;
 });
@@ -482,6 +482,7 @@ function openDetail(id) {
     <form id="d-form" class="form" autocomplete="off" style="border-top:1px solid var(--line);padding-top:14px">
       <div class="f w6"><h3>Edit</h3></div>
       <div class="f w6"><label for="d-title">Card</label><input id="d-title" value="${v(l.title)}"></div>
+      ${isDropoff(l) ? "" : `<div class="f"><label for="d-plat">Auction house</label><select id="d-plat">${Object.entries(PLAT).map(([k, n]) => `<option value="${k}"${k === l.plat ? " selected" : ""}>${n}</option>`).join("")}</select></div>`}
       <div class="f"><label for="d-grade">Grade</label><input id="d-grade" value="${v(l.grade === "Ungraded" ? "" : l.grade)}" placeholder="Ungraded"></div>
       <div class="f"><label for="d-cert">Cert #</label><input id="d-cert" value="${v(l.cert)}" style="font-family:var(--mono)"></div>
       <div class="f"><label for="d-period">${l.plat === "pcs" ? "Payout month" : "Auction / period"}</label><input id="d-period" value="${v(l.period)}" placeholder="${l.plat === "pcs" ? "October 2026" : "WA180"}"></div>
@@ -681,6 +682,8 @@ detail.body.addEventListener("submit", async e => {
   const cnt = parseInt($("#d-count").value, 10);
   const patch = { title, grade: normGrade($("#d-grade").value), cert: $("#d-cert").value.trim(), period: $("#d-period").value.trim(), ends: endsFor($("#d-period").value.trim(), l) || (l.plat === "fan" ? "" : l.ends || ""), price: num("#d-price"), payout: num("#d-payout"), split: num("#d-split"), lotCount: isNaN(cnt) ? null : cnt, url, item: d ? d.item : (url ? l.item : "") };
   if (d) patch.plat = d.plat;
+  if ($("#d-plat") && $("#d-plat").value !== l.plat) patch.plat = $("#d-plat").value; // picking an auction house by hand wins
+  if (patch.plat === "store" && l.status === "curating") patch.status = "live";
   if (url && l.status === "curating") patch.status = "live";
   const ok = await guarded($("#d-msg"), async () => { await updateDoc(listingRef(l.id), { ...patch, updatedAt: serverTimestamp() }); return true; });
   if (ok) { Object.assign(l, patch); openDetail(l.id); $("#d-msg").textContent = "Saved."; }
@@ -1803,6 +1806,7 @@ function platFromShelf(v) {
   if (v.includes("fanatics")) return "fan";
   if (/\bpcs?\b|pc sports/.test(v)) return "pcs";
   if (v.includes("goldin")) return "goldin";
+  if (/in[ -]?store|wheelhouse/.test(v)) return "store";
   if (v.includes("shibe")) return "shibe";
   return "other";
 }

@@ -164,6 +164,7 @@ footer{padding-block:24px 40px;color:var(--muted);font-size:12px;text-align:cent
 .notice ul{margin:4px 0 0;padding-left:18px;display:grid;gap:2px}
 .st.curating{background:var(--paid)}
 .chip.goldin,.chip.shibe,.chip.other{color:var(--muted)}
+.chip.store{color:#7a4f00;background:#fbefd9}
 .st.returned{background:var(--unsold)}
 /* Panels size to their own content instead of stretching to match the taller panel beside them */
 .panel{align-content:start}

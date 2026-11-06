@@ -4,7 +4,7 @@ export const $ = (s, r = document) => r.querySelector(s);
 export const CONTACT_EMAIL = "consignment@wheelhousecards.com";
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const money = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
-export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards", goldin: "Goldin", shibe: "Shibe Sports", other: "Other" };
+export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards", store: "In store at Wheelhouse", goldin: "Goldin", shibe: "Shibe Sports", other: "Other" };
 export const STAT = { curating: "Being curated", live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you", removed: "Removed" };
 export const pad6 = n => String(n).padStart(6, "0");
 export const plural = n => `${n} card${n === 1 ? "" : "s"}`;
@@ -402,7 +402,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
         l = { ...l, price: sm.sold + sm.paid ? sm.gross : null };
       }
       else if (l.status === "live" && l.format !== "bin") { label = "Live in auction"; liveAuc = true; }
-      else if (l.status === "live") { label = "Asking"; sub = "Buy It Now"; }
+      else if (l.status === "live") { label = "Asking"; sub = l.plat === "store" ? "For sale in store at Wheelhouse" : "Buy It Now"; }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
       else if (isSold(l)) { label = "Sold for"; recv = cardPayout(l, c) ?? "pending"; sub = staff && l.payout == null && cardSplit(l, c) != null ? `${cardSplit(l, c)}% split` + (l.status === "paid" ? " · paid" : "") : l.status === "paid" ? "Paid out" : ""; }
       else if (l.status === "returned") { label = "Returned to you"; sub = ""; }
