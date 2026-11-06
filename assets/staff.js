@@ -1,17 +1,17 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106131351";
+import { db, logout } from "./firebase.js?v=20261106141529";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  $, esc, money, PLAT, STAT, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
+  $, esc, money, PLAT, STAT, isAuctionNo, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106131351";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106131351";
-import { emailSend, contact } from "./firebase-config.js?v=20261106131351";
+} from "./ui.js?v=20261106141529";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106141529";
+import { emailSend, contact } from "./firebase-config.js?v=20261106141529";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1002,7 +1002,7 @@ async function openReceipt(b) {
 const endsFor = (period, l) => (period && (!l || !l.plat || l.plat === "fan") && S.fanEnds?.[String(period).toUpperCase()]) || "";
 function renderFanAuctions() {
   const by = new Map();
-  S.active.filter(l => l.plat === "fan" && l.period && ["curating", "live"].includes(l.status)).forEach(l => { const k = l.period.toUpperCase(); by.set(k, (by.get(k) || 0) + 1); });
+  S.active.filter(l => l.plat === "fan" && isAuctionNo(l.period) && ["curating", "live"].includes(l.status)).forEach(l => { const k = l.period.toUpperCase(); by.set(k, (by.get(k) || 0) + 1); });
   const keys = [...by.keys()].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
   $("#fa-count").textContent = keys.length ? `${keys.length} auction${keys.length === 1 ? "" : "s"}` : "";
   if ($("#fa-body").contains(document.activeElement)) return;

@@ -113,6 +113,8 @@ export function gradeHtml(l, stack) {
   return stack ? `<div class="gcell"><span class="slab">${esc(l.grade)}</span>${cert}</div>` : `<span class="slab">${esc(l.grade)}</span>${cert}`;
 }
 
+// A Fanatics weekly auction # looks like WA180 or just 180. Other labels (VAULT, BIN) aren't timed auctions.
+export const isAuctionNo = p => /^(wa)?\s*\d+$/i.test(String(p || "").trim());
 // Auction end dates are plain days (YYYY-MM-DD) set per Fanatics Auction #.
 export const fmtEnd = d => { const x = new Date(String(d).slice(0, 10) + "T12:00:00"); return isNaN(x) ? "" : x.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); };
 export const auctionOver = d => !!d && String(d).slice(0, 10) < new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
@@ -180,7 +182,7 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     ...(staff && c ? [["Consignor", `<span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${esc(c.id)}">${esc(c.name)}</button>`]] : []),
     ...(l.batch ? [["Batch", `<span class="code">${esc(l.batch)}</span>`]] : []),
     ...(l.added ? [["Added", fmtLong(l.added)]] : []),
-    ...(l.status === "live" ? (l.format === "bin" ? [["Asking price", money(l.price)]] : [["Auction", l.ends ? (auctionOver(l.ends) ? `Ended ${fmtEnd(l.ends)} · results coming soon` : `Live · ends ${fmtEnd(l.ends)}`) : "Live now"], ...(bidLink(l) ? [["Current bid", `<a href="${esc(bidLink(l))}" target="_blank" rel="noopener">See it on ${PLAT[l.plat]} ↗</a>`]] : [])]) : []),
+    ...(l.status === "live" ? (l.format === "bin" || (l.period && !isAuctionNo(l.period)) ? [["Asking price", money(l.price)]] : [["Auction", l.ends ? (auctionOver(l.ends) ? `Ended ${fmtEnd(l.ends)} · results coming soon` : `Live · ends ${fmtEnd(l.ends)}`) : "Live now"], ...(bidLink(l) ? [["Current bid", `<a href="${esc(bidLink(l))}" target="_blank" rel="noopener">See it on ${PLAT[l.plat]} ↗</a>`]] : [])]) : []),
     ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), ...(cardFee(l) && l.payout == null ? [["Fanatics CGC Authentication service fee", "−" + money(cardFee(l))]] : []), [staff ? "Consignor portion" : "Your share", shareText(cardPayout(l, c), staff) + (staff && l.payout == null && cardSplit(l, c) != null ? ` (${cardSplit(l, c)}%${l.split != null && l.split !== "" ? ", set for this card" : ""})` : "")]] : []),
     ...(l.pcsId ? [["PC Sportscards card #", `<span class="code">${esc(l.pcsId)}</span>`]] : []),
     ...(l.item ? [["eBay / listing #", `<span class="code">${esc(l.item)}</span>`]] : []),
@@ -401,7 +403,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
         if (sm.sold + sm.paid) recv = share ?? "pending";
         l = { ...l, price: sm.sold + sm.paid ? sm.gross : null };
       }
-      else if (l.status === "live" && l.format !== "bin") { label = "Live in auction"; liveAuc = true; }
+      else if (l.status === "live" && l.format !== "bin" && (!l.period || isAuctionNo(l.period))) { label = "Live in auction"; liveAuc = true; }
       else if (l.status === "live") { label = "Asking"; sub = l.plat === "store" ? "For sale in store at Wheelhouse" : "Buy It Now"; }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
       else if (isSold(l)) { label = "Sold for"; recv = cardPayout(l, c) ?? "pending"; sub = staff && l.payout == null && cardSplit(l, c) != null ? `${cardSplit(l, c)}% split` + (l.status === "paid" ? " · paid" : "") : l.status === "paid" ? "Paid out" : ""; }
