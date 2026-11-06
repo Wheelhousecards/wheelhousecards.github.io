@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106112811";
+import { db, logout } from "./firebase.js?v=20261106113710";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106112811";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106112811";
-import { emailSend, contact } from "./firebase-config.js?v=20261106112811";
+} from "./ui.js?v=20261106113710";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106113710";
+import { emailSend, contact } from "./firebase-config.js?v=20261106113710";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -258,6 +258,8 @@ function renderCustList() {
   }).join("") : `<div class="empty">${S.customers.length ? "No consignors match that search." : "No consignors yet. Add one below."}</div>`;
 }
 
+const skuNum = l => { const n = parseInt(String(l.sku || "").replace(/\D/g, ""), 10); return isNaN(n) ? -1 : n; };
+const skuDesc = (a, b) => skuNum(b) - skuNum(a) || String(b.sku || "").localeCompare(String(a.sku || ""));
 function renderLedger() {
   const tb = $("#tbody");
   if (tb.contains(document.activeElement) && document.activeElement.tagName !== "BUTTON" && document.activeElement.type !== "checkbox") { tb.dataset.stale = "1"; return; }
@@ -279,14 +281,12 @@ function renderLedger() {
     (!fp || l.plat === fp) && (!fs || l.status === fs) &&
     (!fb || (fb === "__nob" ? !batchById(l.batch) : l.batch === fb)) &&
     (!q || [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q))
-  ).sort(view === "paid" || view === "returned"
-    ? (a, b) => (b.soldDate || b.added || "").localeCompare(a.soldDate || a.added || "") || (b.sku || "").localeCompare(a.sku || "")
-    : (a, b) => (a.status === "live" ? 0 : 1) - (b.status === "live" ? 0 : 1) || (b.sku || "").localeCompare(a.sku || ""));
+  ).sort(skuDesc); // always newest SKU first
   const viewName = { play: "in play", paid: "paid out", returned: "returned", all: "in total", removed: "removed", batch: "in total" }[view];
   if (view === "batch") {
     // Group by batch (newest first); cards without a batch go last.
     const bOrder = new Map([...S.batches].sort((a, b) => (b.recv || "").localeCompare(a.recv || "") || b.id.localeCompare(a.id)).map((b, i) => [b.id, i]));
-    rows.sort((a, b) => (bOrder.get(a.batch) ?? 1e9) - (bOrder.get(b.batch) ?? 1e9) || (b.sku || "").localeCompare(a.sku || ""));
+    rows.sort((a, b) => (bOrder.get(a.batch) ?? 1e9) - (bOrder.get(b.batch) ?? 1e9) || skuDesc(a, b));
   }
   $("#bb-del").hidden = view === "removed"; $("#bb-restore").hidden = view !== "removed"; $("#bb-purge").hidden = view !== "removed";
   $("#count").textContent = loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
