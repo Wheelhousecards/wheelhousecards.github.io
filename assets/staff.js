@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106152737";
+import { db, logout } from "./firebase.js?v=20261106154955";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106152737";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106152737";
-import { emailSend, contact } from "./firebase-config.js?v=20261106152737";
+} from "./ui.js?v=20261106154955";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106154955";
+import { emailSend, contact } from "./firebase-config.js?v=20261106154955";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1024,6 +1024,20 @@ $("#fa-body").addEventListener("change", async e => {
   });
   e.target.blur(); renderFanAuctions();
 });
+/* ---------- "Grab Fanatics links" bookmarklet ----------
+   Runs on a Fanatics Collect share page (fanaticscollect.com/share/vault/…) in the user's own browser,
+   opens each card's page for its cert #, and downloads a CSV for Import → Fanatics export + links. */
+(() => {
+  const code = `(async()=>{const m=location.pathname.match(/\\/share\\/vault\\/([^/]+)/);if(!m){alert("Open a Fanatics Collect share link first, then click this bookmark.");return}
+const base="/share/vault/"+m[1]+"/",names={};
+document.querySelectorAll('a[href*="/share/vault/"]').forEach(a=>{const id=(a.href.match(/\\/(\\d+)$/)||[])[1],t=a.innerText.trim();if(id&&t&&!/slideshow/i.test(t))names[id]=t;});
+const ids=Object.keys(names),q=v=>'"'+String(v).replace(/"/g,'""')+'"',rows=[["Card","Grade","Cert #","Link"].map(q).join(",")];
+document.title="Grabbing 0 of "+ids.length+"…";let n=0;
+for(const id of ids){let g="",c="";try{const d=new DOMParser().parseFromString(await(await fetch(base+id)).text(),"text/html"),t=d.body.innerText;c=(t.match(/Serial Number:\\s*([A-Za-z0-9-]+)/)||[])[1]||"";g=((t.match(/Grade:\\s*([^\\n]+)/)||[])[1]||"").trim();}catch(e){}
+rows.push([names[id],g,c,location.origin+base+id].map(q).join(","));document.title="Grabbing "+(++n)+" of "+ids.length+"…";}
+const b=new Blob([rows.join("\\n")],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="fanatics-links-"+new Date().toISOString().slice(0,10)+".csv";document.body.appendChild(a);a.click();a.remove();document.title="Downloaded "+ids.length+" cards";})()`;
+  const el = $("#fan-grab"); if (el) { el.href = "javascript:" + encodeURIComponent(code.replace(/\n/g, "")); el.addEventListener("click", e => { e.preventDefault(); $("#i-msg") && ($("#i-msg").textContent = "Drag “Grab Fanatics links” to your bookmarks bar, then click it on a Fanatics share page."); }); }
+})();
 function renderPayouts() {
   const rows = S.customers.map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004 || x.o.needPct).sort((a, b) => b.o.amount - a.o.amount);
   $("#p-total").textContent = rows.length ? `${money(rows.reduce((s, x) => s + x.o.amount, 0))} owed to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
@@ -1629,7 +1643,7 @@ function planCust() {
 // Match each row of a Fanatics export to a card already entered: cert number first, then exact title.
 function planFan() {
   const m = imp.map, pick = batchById($("#i-batch").value);
-  const digits = v => String(v || "").replace(/\D/g, "");
+  const digits = v => String(v || "").replace(/\D/g, "").replace(/^0+(?=\d)/, ""); // BGS certs come with leading zeros
   const norm = t => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const byCert = new Map();
   S.listings.filter(l => digits(l.cert)).sort((a, b) => (a.plat === "fan" ? 1 : 0) - (b.plat === "fan" ? 1 : 0)).forEach(l => byCert.set(digits(l.cert), l));
