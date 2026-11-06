@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106113710";
+import { db, logout } from "./firebase.js?v=20261106120202";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106113710";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106113710";
-import { emailSend, contact } from "./firebase-config.js?v=20261106113710";
+} from "./ui.js?v=20261106120202";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106120202";
+import { emailSend, contact } from "./firebase-config.js?v=20261106120202";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -134,6 +134,7 @@ function listen() {
   unsubs.push(onSnapshot(col("meta"), s => {
     const c = s.docs.find(d => d.id === "counters"); S.counters = c ? c.data() : {};
     const pool = s.docs.find(d => d.id === "pcsPool"); S.pool = pool ? (pool.data().rows || []) : [];
+    const fa = s.docs.find(d => d.id === "fanAuctions"); S.fanEnds = fa ? (fa.data().ends || {}) : {};
     S.imports = s.docs.filter(d => d.id.startsWith("imp-")).map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.id.localeCompare(a.id));
     render();
   }, () => {}));
@@ -238,6 +239,7 @@ function renderStaff() {
   $("#a-batch").innerHTML = batchOptions($("#a-batch").value, '<option value="">No batch</option>');
   renderCustList();
   renderPayouts();
+  renderFanAuctions();
   renderSort();
   renderStaffList();
   renderBatches();
@@ -377,7 +379,7 @@ $("#addForm").addEventListener("submit", async e => {
     const period = $("#a-auction").value.trim().toUpperCase(), p = parseFloat($("#a-price").value);
     await setDoc(doc(col("listings")), {
       sku, cust, custEmail: emailOf(cust), batch: $("#a-batch").value || "", plat, url, item: d ? d.item : "", title, grade, cert,
-      format: $("#a-format").value, price: isNaN(p) ? null : p, ends: "", ...(period ? { period } : {}),
+      format: $("#a-format").value, price: isNaN(p) ? null : p, ends: endsFor(period, { plat }), ...(period ? { period } : {}),
       status: url ? "live" : "curating", soldDate: "", added: now(), addedBy: me, updatedAt: serverTimestamp()
     });
     ["#a-url", "#a-title", "#a-grade", "#a-cert", "#a-price"].forEach(s => { $(s).value = ""; });
@@ -677,7 +679,7 @@ detail.body.addEventListener("submit", async e => {
   if (url && !d) { $("#d-msg").textContent = "That link isn’t from Fanatics Collect or eBay."; return; }
   const title = $("#d-title").value.trim(); if (!title) { $("#d-msg").textContent = "Enter the card name."; return; }
   const cnt = parseInt($("#d-count").value, 10);
-  const patch = { title, grade: normGrade($("#d-grade").value), cert: $("#d-cert").value.trim(), period: $("#d-period").value.trim(), price: num("#d-price"), payout: num("#d-payout"), split: num("#d-split"), lotCount: isNaN(cnt) ? null : cnt, url, item: d ? d.item : (url ? l.item : "") };
+  const patch = { title, grade: normGrade($("#d-grade").value), cert: $("#d-cert").value.trim(), period: $("#d-period").value.trim(), ends: endsFor($("#d-period").value.trim(), l) || (l.plat === "fan" ? "" : l.ends || ""), price: num("#d-price"), payout: num("#d-payout"), split: num("#d-split"), lotCount: isNaN(cnt) ? null : cnt, url, item: d ? d.item : (url ? l.item : "") };
   if (d) patch.plat = d.plat;
   if (url && l.status === "curating") patch.status = "live";
   const ok = await guarded($("#d-msg"), async () => { await updateDoc(listingRef(l.id), { ...patch, updatedAt: serverTimestamp() }); return true; });
@@ -992,6 +994,33 @@ async function openReceipt(b) {
     onSent: () => updateDoc(doc(db, "batches", b.id), { receiptAt: now() }),
   });
 }
+/* ---------- Fanatics auction end dates ---------- */
+// One end date per Fanatics Auction #, copied onto every card with that # so customers can see it.
+const endsFor = (period, l) => (period && (!l || !l.plat || l.plat === "fan") && S.fanEnds?.[String(period).toUpperCase()]) || "";
+function renderFanAuctions() {
+  const by = new Map();
+  S.active.filter(l => l.plat === "fan" && l.period && ["curating", "live"].includes(l.status)).forEach(l => { const k = l.period.toUpperCase(); by.set(k, (by.get(k) || 0) + 1); });
+  const keys = [...by.keys()].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  $("#fa-count").textContent = keys.length ? `${keys.length} auction${keys.length === 1 ? "" : "s"}` : "";
+  if ($("#fa-body").contains(document.activeElement)) return;
+  $("#fa-body").innerHTML = keys.length ? keys.map(k => `<tr data-k="${esc(k)}"><td><span class="code">${esc(k)}</span></td><td class="num">${by.get(k)}</td>
+    <td><input type="date" value="${esc(S.fanEnds?.[k] || "")}" aria-label="End date for auction ${esc(k)}"></td>
+    <td>${S.fanEnds?.[k] ? `<span class="muted" style="font-size:12px">Ends ${fmtDay(S.fanEnds[k])}</span>` : '<span class="need" style="font-size:12px">No end date</span>'}</td></tr>`).join("")
+    : '<tr><td colspan="4"><div class="empty">No live or curating Fanatics cards have an Auction # yet.</div></td></tr>';
+}
+$("#fa-body").addEventListener("change", async e => {
+  const tr = e.target.closest("tr[data-k]"); if (!tr) return;
+  const k = tr.dataset.k, v = e.target.value || "";
+  await guarded($("#fa-msg"), async () => {
+    const ends = { ...(S.fanEnds || {}) }; if (v) ends[k] = v; else delete ends[k];
+    await setDoc(doc(db, "meta", "fanAuctions"), { ends, updatedAt: now() });
+    S.fanEnds = ends;
+    const cards = S.all.filter(l => l.plat === "fan" && (l.period || "").toUpperCase() === k && l.status !== "removed" && (l.ends || "") !== v);
+    if (cards.length) await commit(cards.map(l => upd(l.id, { ends: v })));
+    $("#fa-msg").textContent = v ? `Auction ${k} ends ${fmtDay(v)}. Updated ${plural(cards.length)}.` : `Cleared the end date for auction ${k}.`;
+  });
+  e.target.blur(); renderFanAuctions();
+});
 function renderPayouts() {
   const rows = S.customers.map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004 || x.o.needPct).sort((a, b) => b.o.amount - a.o.amount);
   $("#p-total").textContent = rows.length ? `${money(rows.reduce((s, x) => s + x.o.amount, 0))} owed to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
@@ -1057,8 +1086,8 @@ $("#tbody").addEventListener("change", async e => {
     if (f === "period") {
       const v = e.target.value.trim().toUpperCase(); e.target.value = v;
       if (v === (l.period || "")) return;
-      await updateDoc(listingRef(l.id), { period: v, updatedAt: serverTimestamp() });
-      lmsg(v ? `SKU ${l.sku} is in auction ${v}.` : `Cleared the auction # on SKU ${l.sku}.`);
+      await updateDoc(listingRef(l.id), { period: v, ends: endsFor(v, l), updatedAt: serverTimestamp() });
+      lmsg(v ? `SKU ${l.sku} is in auction ${v}.` + (endsFor(v, l) ? ` Ends ${fmtDay(endsFor(v, l))}.` : "") : `Cleared the auction # on SKU ${l.sku}.`);
     }
     if (f === "format") { const v = e.target.value; await updateDoc(listingRef(l.id), { format: v, updatedAt: serverTimestamp() }); lmsg(`SKU ${l.sku} is now ${v === "bin" ? "Buy It Now" : "Auction"}.`); }
     if (f === "price") { const p = parseFloat(e.target.value); await updateDoc(listingRef(l.id), { price: isNaN(p) ? null : p, updatedAt: serverTimestamp() }); }
@@ -1120,7 +1149,7 @@ $("#bb-st-go").addEventListener("click", e => bulk(e.target, async () => {
 }));
 $("#bb-auc-go").addEventListener("click", e => bulk(e.target, async () => {
   const v = $("#bb-auc").value.trim().toUpperCase(), ls = selected();
-  await commit(ls.map(l => upd(l.id, { period: v })));
+  await commit(ls.map(l => upd(l.id, { period: v, ends: endsFor(v, l) })));
   lmsg(v ? `Set auction ${v} on ${plural(ls.length)}.` : `Cleared the auction # on ${plural(ls.length)}.`);
 }));
 $("#bb-fmt-go").addEventListener("click", e => bulk(e.target, async () => {
@@ -1505,7 +1534,7 @@ function planImport() {
     if (item) { if (seen.has(item)) return { act: "skip", why: "Same item # is in the file twice", label }; seen.add(item); }
     const grade = normGrade(g("grade")), cert = g("cert");
     const pr = g("price").replace(/[^0-9.]/g, ""), price = pr ? parseFloat(pr) : null;
-    const period = g("period").toUpperCase(), ends = "";
+    const period = g("period").toUpperCase();
     const sv = g("status").toLowerCase();
     const status = !sv ? "" : /curat/.test(sv) ? "curating" : /unsold|not sold|no sale|return/.test(sv) ? "unsold" : /paid/.test(sv) ? "paid" : /sold/.test(sv) ? "sold" : "live";
     const fv = g("format").toLowerCase();
@@ -1529,7 +1558,7 @@ function planImport() {
     if (!sku || used.has(sku)) { while (used.has(pad6(next))) next++; sku = pad6(next++); auto = true; }
     used.add(sku);
     if (grade !== "Ungraded" && !cert) warn = warn || "Graded, but no cert #";
-    return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends, ...(split != null ? { split } : {}), ...(period ? { period } : {}), status: status || (url ? "live" : "curating"), soldDate: (status === "sold" || status === "paid") ? now() : "" } };
+    return { act: "new", label: title, warn, auto, data: { sku, cust, batch: bt ? bt.id : "", plat, url, item, title, grade, cert, format, price, ends: endsFor(period, { plat }), ...(split != null ? { split } : {}), ...(period ? { period } : {}), status: status || (url ? "live" : "curating"), soldDate: (status === "sold" || status === "paid") ? now() : "" } };
   }).filter(Boolean);
 }
 function planCust() {
@@ -2025,7 +2054,7 @@ $("#i-go").addEventListener("click", async () => {
       if (p.patch) { keep(p.target, p.patch); ops.push(upd(p.target.id, p.patch)); return; }
       const t = p.target, data = {};
       if (p.price != null) data.price = p.price;
-      if (p.period) data.period = p.period;
+      if (p.period) { data.period = p.period; data.ends = endsFor(p.period, p.target); }
       if (p.status) { data.status = p.status; if ((p.status === "sold" || p.status === "paid") && !t.soldDate) data.soldDate = now(); }
       if (p.cust) { data.cust = p.cust; data.custEmail = emailOf(p.cust); }
       if (p.batch) data.batch = p.batch;

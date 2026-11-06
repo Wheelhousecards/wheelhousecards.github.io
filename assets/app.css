@@ -213,3 +213,5 @@ input.auction::placeholder{text-transform:none;font-family:var(--body)}
 .card .right .amt.recv{font-weight:800}
 .card .right .soldfor{font-size:12px;color:#6b6b6b;font-weight:400}
 .csearch{min-width:220px}
+.bidlink{display:inline-block;margin-top:6px;font-size:13px;font-weight:700;color:#4472C3;text-decoration:none}
+.bidlink:hover{text-decoration:underline}
