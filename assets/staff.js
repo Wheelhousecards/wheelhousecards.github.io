@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106141529";
+import { db, logout } from "./firebase.js?v=20261106152737";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106141529";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106141529";
-import { emailSend, contact } from "./firebase-config.js?v=20261106141529";
+} from "./ui.js?v=20261106152737";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106152737";
+import { emailSend, contact } from "./firebase-config.js?v=20261106152737";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1194,6 +1194,19 @@ $("#bb-purge").addEventListener("click", e => {
     ui.sel.clear(); lmsg(`Deleted ${plural(ls.length)} for good.`);
   });
 });
+// Export the selected cards so links can be pasted in, then re-uploaded through Fanatics export + links (matched by SKU).
+$("#bb-export").addEventListener("click", () => {
+  const ls = selected().filter(l => !isDropoff(l)).sort(skuDesc);
+  if (!ls.length || !window.XLSX) return lmsg("Select some cards first.");
+  const rows = ls.map(l => ({ "Wheelhouse SKU": l.sku, Consignor: custById(l.cust)?.name || "", Code: custById(l.cust)?.code || "", "Auction house": PLAT[l.plat] || "", Card: l.title, Grade: l.grade || "Ungraded", "Cert #": l.cert || "", "Auction #": l.period || "", Link: l.url || "" }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!cols"] = [10, 22, 8, 18, 56, 12, 14, 11, 60].map(wch => ({ wch }));
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Cards");
+  const custs = [...new Set(ls.map(l => custById(l.cust)?.code).filter(Boolean))];
+  XLSX.writeFile(wb, `${custs.length === 1 ? custs[0] : "wheelhouse"}-cards-for-links-${today()}.xlsx`);
+  lmsg(`Downloaded ${plural(ls.length)}. Paste each listing link in the Link column, then upload it under Import → Fanatics export + links.`);
+});
 $("#bb-clear").addEventListener("click", () => { ui.sel.clear(); delArm = false; renderLedger(); });
 
 /* ---------- batches ---------- */
@@ -1437,6 +1450,7 @@ function parsePayout(p1, p2, a2, city, state, zip) {
 const money2 = v => { const n = parseFloat(String(v || "").replace(/[^0-9.-]/g, "")); return isNaN(n) ? 0 : Math.round(n * 100) / 100; };
 // Fanatics collection export: only these columns are used, everything else in the file is ignored.
 const FFIELDS = [
+  { k: "sku", label: "Wheelhouse SKU (from Export for links)", re: /wheelhouse sku/i },
   { k: "url", label: "Listing link (the column you add)", re: /url|link/i },
   { k: "cert", label: "Cert #", re: /cert/i },
   { k: "title", label: "Card", re: /title|card|desc/i },
@@ -1625,12 +1639,13 @@ function planFan() {
   let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
   return imp.rows.map(r => {
     const g = k => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
-    const url = g("url"), title = g("title"), cert = digits(g("cert")), grade = normGrade(g("grade"));
-    if (!url && !title && !cert) return null;
+    const url = g("url"), title = g("title"), cert = digits(g("cert")), grade = normGrade(g("grade")), skuIn = digits(g("sku"));
+    if (!url && !title && !cert && !skuIn) return null;
     const label = title || `Cert ${cert}`;
     const d = url ? detect(url) : null;
     if (url && !d) return { act: "skip", why: "Link isn’t from Fanatics Collect or eBay", label };
-    let t = cert && byCert.get(cert), how = "cert";
+    let t = skuIn && S.listings.find(l => l.sku === skuIn.padStart(6, "0") && !isDropoff(l)), how = "SKU";
+    if (!t) { t = cert && byCert.get(cert); how = "cert"; }
     if (!t) { t = byTitle.get(norm(title)); how = "title"; }
     if (t && used.has(t.id)) return { act: "skip", why: `Same card as another row (SKU ${t.sku})`, label };
     if (t) {
