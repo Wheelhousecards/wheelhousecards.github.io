@@ -1,7 +1,7 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106171612";
+import { db, logout } from "./firebase.js?v=20261106173156";
 import {
-  collection, doc, onSnapshot, getDoc, getDocs, query, where,
+  collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106171612";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106171612";
-import { emailSend, contact } from "./firebase-config.js?v=20261106171612";
+} from "./ui.js?v=20261106173156";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106173156";
+import { emailSend, contact } from "./firebase-config.js?v=20261106173156";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -48,7 +48,19 @@ const batchById = id => S.batches.find(b => b.id === id);
 const emailOf = id => custById(id)?.email || "";
 const maxSku = () => S.all.reduce((m, l) => Math.max(m, parseInt(l.sku, 10) || 0), 0);
 const maxBatchNo = () => S.batches.reduce((m, b) => Math.max(m, parseInt(String(b.id).replace(/\D/g, ""), 10) || 0), 0);
-const nextSku = () => pad6(Math.max(S.counters.sku || 0, maxSku()) + 1);
+// Next SKU = one past the highest SKU any card actually has (S.topSku is read from the database, removed cards included).
+// The counter guards against two people saving at once; a counter left ahead by deleted cards is pulled back down.
+const nextSku = () => pad6(Math.max(S.topSku || 0, maxSku()) + 1);
+async function syncSkuCounter() {
+  try {
+    const top = await getDocs(query(collection(db, "listings"), orderBy("sku", "desc"), limit(1)));
+    const n = top.empty ? 0 : parseInt(top.docs[0].data().sku, 10) || 0;
+    S.topSku = Math.max(S.topSku || 0, n);
+    const ref = doc(db, "meta", "counters");
+    await runTransaction(db, async tx => { const c = await tx.get(ref); const cur = c.exists() ? (c.data().sku || 0) : 0; if (cur > n) tx.set(ref, { sku: n }, { merge: true }); });
+    if (!$("#a-sku").dataset.manual) $("#a-sku").value = nextSku();
+  } catch (e) { console.error(e); }
+}
 const now = () => new Date().toISOString();
 
 const views = ["gate", "loading", "denied", "staff", "cust"];
@@ -57,6 +69,7 @@ const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
 /* ---------- Firestore helpers ---------- */
 const col = name => collection(db, name);
 async function reserve(field, n, floor) {
+  if (field === "sku") await syncSkuCounter();
   const ref = doc(db, "meta", "counters");
   return runTransaction(db, async tx => {
     const s = await tx.get(ref);
@@ -122,6 +135,7 @@ $("#logout").addEventListener("click", () => logout());
 $("#denied-out").addEventListener("click", () => logout());
 
 function listen() {
+  setTimeout(syncSkuCounter, 1500);
   const need = ["customers", "listings", "batches", "staff", "notes"];
   const done = k => { ready.add(k); if (need.every(n => ready.has(n))) { setMode(ui.mode); } };
   const fail = e => { console.error(e); $("#loading").textContent = "Couldn’t load data. Refresh the page to try again."; };
@@ -385,7 +399,8 @@ $("#addForm").addEventListener("submit", async e => {
     ["#a-url", "#a-title", "#a-grade", "#a-cert", "#a-price"].forEach(s => { $(s).value = ""; });
     delete $("#a-sku").dataset.manual;
     // Show the next free SKU right away (the new card may not be in the list yet).
-    $("#a-sku").value = pad6(Math.max(parseInt(nextSku(), 10), parseInt(sku, 10) + 1));
+    S.topSku = Math.max(S.topSku || 0, parseInt(sku, 10));
+    $("#a-sku").value = nextSku();
     say(`Added as SKU ${sku}. It shows on ${custById(cust).name}’s page as ${url || plat === "store" ? "Live" : "Being curated"}.`);
   });
   $("#a-save").disabled = false;
@@ -1556,7 +1571,7 @@ function readFile(file) {
 function planImport() {
   const type = itype(), m = imp.map;
   const used = new Set(S.all.map(l => l.sku));
-  let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
+  let next = Math.max(S.topSku || 0, maxSku()) + 1;
   const byItem = new Map(S.all.filter(l => l.item).map(l => [l.item, l]));
   const seen = new Set(), pick = batchById($("#i-batch").value);
   return imp.rows.map(r => {
@@ -1661,7 +1676,7 @@ function planFan() {
   const byTitle = new Map();
   S.listings.filter(l => l.plat === "fan" && !l.url).forEach(l => { const k = norm(l.title); byTitle.set(k, byTitle.has(k) ? null : l); });
   const used = new Set(), usedSku = new Set(S.all.map(l => l.sku));
-  let next = Math.max(S.counters.sku || 0, maxSku()) + 1;
+  let next = Math.max(S.topSku || 0, maxSku()) + 1;
   return imp.rows.map(r => {
     const g = k => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
     const url = g("url"), title = g("title"), cert = digits(g("cert")), grade = normGrade(g("grade")), skuIn = digits(g("sku"));
