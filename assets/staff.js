@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261105172747";
+import { db, logout } from "./firebase.js?v=20261106103021";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261105172747";
-import { setupGate, gateMarkup } from "./gate.js?v=20261105172747";
-import { emailSend, contact } from "./firebase-config.js?v=20261105172747";
+} from "./ui.js?v=20261106103021";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106103021";
+import { emailSend, contact } from "./firebase-config.js?v=20261106103021";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -405,7 +405,7 @@ function fmtPhone(v) {
 }
 let editingCust = "";
 function resetCustForm() {
-  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; syncPayHint();
+  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable", "#c-pcs"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; syncPayHint();
   $("#c-save").textContent = "Add consignor"; $("#c-cancel").hidden = true;
 }
 $("#c-phone").addEventListener("blur", e => { e.target.value = fmtPhone(e.target.value); });
@@ -424,7 +424,9 @@ $("#custForm").addEventListener("submit", async e => {
   if (payMethod === "paypal" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payTo)) return say("Enter the email address on their PayPal account.");
   if (payMethod === "check" && !mailing) return say("Enter a mailing address for their checks.");
   const pv = parseFloat($("#c-payable").value), payable = isNaN(pv) || pv < 0 ? 0 : Math.round(pv * 100) / 100;
-  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable };
+  const pp = $("#c-pcs").value.trim(), pcsPct = pp === "" ? null : parseFloat(pp);
+  if (pcsPct != null && (isNaN(pcsPct) || pcsPct < 0 || pcsPct > 100)) return say("PC Sportscards % must be between 0 and 100, or blank for the standard 80%.");
+  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, pcsPct };
   $("#c-save").disabled = true;
   await guarded($("#c-msg"), async () => {
     if (editingCust) {
@@ -453,7 +455,7 @@ $("#custList").addEventListener("click", e => {
   if (ed) {
     const c = custById(ed); editingCust = ed;
     $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; 
-    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; syncPayHint();
+    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; $("#c-pcs").value = c.pcsPct ?? ""; syncPayHint();
     $("#c-save").textContent = `Save ${c.code}`; $("#c-cancel").hidden = false; $("#c-msg").textContent = ""; $("#c-name").focus();
   }
 });
@@ -513,7 +515,7 @@ function openDropDetail(l) {
       <div class="f w6"><h3>Edit</h3></div>
       <div class="f"><label for="dx-date">Dropped off</label><input id="dx-date" type="date" value="${v(l.dropDate)}"></div>
       <div class="f"><label for="dx-n">Cards dropped off</label><input id="dx-n" type="number" min="0" step="1" value="${l.expected || ""}"></div>
-      <div class="f"><label for="dx-pct">Customer’s % of PC payout</label><input id="dx-pct" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="Enter %"></div>
+      <div class="f"><label for="dx-pct">Customer’s % of PC payout</label><input id="dx-pct" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="${splitOf(custById(l.cust), "pcsRate")}% (their rate)"></div>
       <div class="f"><label for="dx-batch">PC batch</label><select id="dx-batch"><option value="">No batch</option>${pcsBatches(l.cust).map(b => `<option value="${b.id}"${b.id === l.batch ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join("")}</select></div>
       <div class="f w6"><label for="dx-cust">Customer</label><select id="dx-cust">${custOptions(l.cust)}</select></div>
       <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="dx-fmsg" role="status"></span></div></div>
@@ -1028,7 +1030,7 @@ $("#p-body").addEventListener("click", async e => {
       const ops = o.cards.map(l => upd(l.id, { status: "paid" }));
       const lots = new Map();
       o.dropItems.forEach(x => lots.set(x.lot.id, x.lot));
-      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => x.status === "sold" && itemPct(x, l) != null ? { ...x, status: "paid", paidOut: today() } : x)))));
+      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => x.status === "sold" && itemPct(x, l, c) != null ? { ...x, status: "paid", paidOut: today() } : x)))));
       ops.push(["update", doc(db, "customers", c.id), { payable: 0, payouts: [...(c.payouts || []), entry], notifiedAt: "", notifiedAmount: null }]);
       await commit(ops);
       msg.textContent = `Logged a ${money(entry.amount)} payout to ${c.name}. Their sold cards are now Paid out.`;

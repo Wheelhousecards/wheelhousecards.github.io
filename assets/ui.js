@@ -27,9 +27,9 @@ export function payLine(c) {
    (from the old system) overrides both. */
 // Fixed splits for everyone (staff-only; customers never see a %). Fanatics Collect: 100% at $200 and up, 90% under $200.
 // A single card can still be given its own split from its detail view.
-// PC Sportscards has no fixed split: staff enter the % on each drop-off (or card). Until then the share is "pending".
-export const SPLIT_DEFAULTS = { fanHi: 100, fanLo: 90, pcsRate: null, rate: 100 };
-export const splitOf = (c, k) => SPLIT_DEFAULTS[k];
+// PC Sportscards: 80% of PC's payout, unless the consignor has a preferred rate (pcsPct), or a drop-off / card is set by hand.
+export const SPLIT_DEFAULTS = { fanHi: 100, fanLo: 90, pcsRate: 80, rate: 100 };
+export const splitOf = (c, k) => k === "pcsRate" && c?.pcsPct != null && c.pcsPct !== "" && !isNaN(+c.pcsPct) ? +c.pcsPct : SPLIT_DEFAULTS[k];
 export const splitLine = () => "Fanatics Collect 100% at $200+, 90% under $200";
 export function cardSplit(l, c) {
   if (l.split != null && l.split !== "") return +l.split;
@@ -64,8 +64,8 @@ export function ebayFind(x) {
   const p = done && x.price > 0 ? `&_udlo=${(x.price - 0.01).toFixed(2)}&_udhi=${(x.price + 0.01).toFixed(2)}` : "";
   return `https://www.ebay.com/sch/i.html?_nkw=${q}${PCS_SELLER ? `&_ssn=${encodeURIComponent(PCS_SELLER)}` : ""}${done ? "&LH_Sold=1&LH_Complete=1" : ""}${p}`;
 }
-export const itemPct = (x, lot) => has(x.split) ? +x.split : has(lot?.split) ? +lot.split : null;
-export const itemShare = (x, c, lot) => { const p = itemPct(x, lot); return p == null ? null : (x.net != null ? x.net : (x.price || 0)) * p / 100; };
+export const itemPct = (x, lot, c) => has(x.split) ? +x.split : has(lot?.split) ? +lot.split : splitOf(c, "pcsRate");
+export const itemShare = (x, c, lot) => { const p = itemPct(x, lot, c); return p == null ? null : (x.net != null ? x.net : (x.price || 0)) * p / 100; };
 export function dropoffSummary(items = []) {
   const n = k => items.filter(x => x.status === k).length;
   const soldItems = items.filter(x => x.status === "sold" || x.status === "paid");
@@ -80,7 +80,7 @@ export function owedFor(c, listings) {
   const soldAll = mine.filter(l => l.status === "sold" && !isDropoff(l));
   const itemsAll = mine.filter(isDropoff).flatMap(l => (l.items || []).filter(x => x.status === "sold").map(x => ({ ...x, lot: l })));
   // Sales with no PC % yet aren't counted until staff set one.
-  const sold = soldAll.filter(l => cardPayout(l, c) != null), dropItems = itemsAll.filter(x => itemPct(x, x.lot) != null);
+  const sold = soldAll.filter(l => cardPayout(l, c) != null), dropItems = itemsAll.filter(x => itemPct(x, x.lot, c) != null);
   const needPct = soldAll.length - sold.length + itemsAll.length - dropItems.length;
   return { cards: sold, dropItems, count: sold.length + dropItems.length, needPct,
     amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + dropItems.reduce((s, x) => s + itemShare(x, c, x.lot), 0) + (c?.payable || 0) };
@@ -385,7 +385,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
       const tl = l.format === "auction" && l.status === "live" ? timeLeft(l.ends) : "";
       let label, sub, recv = null, sub2 = "";
       if (isDropoff(l)) {
-        const sm = dropoffSummary(l.items), soldIt = (l.items || []).filter(x => x.status === "sold" || x.status === "paid"), share = soldIt.some(x => itemPct(x, l) == null) ? null : soldIt.reduce((t, x) => t + itemShare(x, c, l), 0);
+        const sm = dropoffSummary(l.items), soldIt = (l.items || []).filter(x => x.status === "sold" || x.status === "paid"), share = soldIt.some(x => itemPct(x, l, c) == null) ? null : soldIt.reduce((t, x) => t + itemShare(x, c, l), 0);
         label = sm.sold + sm.paid ? "Sold so far" : "PC Sportscards";
         if (staff && (sm.awaiting || sm.relisting)) sub2 = [sm.awaiting ? `${sm.awaiting} awaiting payment` : "", sm.relisting ? `${sm.relisting} to be relisted` : ""].filter(Boolean).join(" · ");
         sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `${gets} ${share == null ? "pending" : money(share)}` : sm.awaiting ? `${sm.awaiting} sold, payment pending` : `${sm.live + sm.relisting} listed on eBay`;
