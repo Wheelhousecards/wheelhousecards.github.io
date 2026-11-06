@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106154955";
+import { db, logout } from "./firebase.js?v=20261106160636";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106154955";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106154955";
-import { emailSend, contact } from "./firebase-config.js?v=20261106154955";
+} from "./ui.js?v=20261106160636";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106160636";
+import { emailSend, contact } from "./firebase-config.js?v=20261106160636";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1028,14 +1028,21 @@ $("#fa-body").addEventListener("change", async e => {
    Runs on a Fanatics Collect share page (fanaticscollect.com/share/vault/…) in the user's own browser,
    opens each card's page for its cert #, and downloads a CSV for Import → Fanatics export + links. */
 (() => {
-  const code = `(async()=>{const m=location.pathname.match(/\\/share\\/vault\\/([^/]+)/);if(!m){alert("Open a Fanatics Collect share link first, then click this bookmark.");return}
+  const code = `(async()=>{const q=v=>'"'+String(v).replace(/"/g,'""')+'"',dl=(rows,name)=>{const b=new Blob([rows.join("\\n")],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name+"-"+new Date().toISOString().slice(0,10)+".csv";document.body.appendChild(a);a.click();a.remove();};
+const live=[...new Set([...document.querySelectorAll('a[href*="/weekly/"],a[href*="/premier/"],a[href*="/fixed/"]')].map(a=>a.href.split("?")[0]))];
+if(live.length&&!/\\/share\\/vault\\//.test(location.pathname)){const rows=[["Card","Grade","Cert #","Link","Auction #","Lot","Auction ends"].map(q).join(",")];let n=0;
+for(const l of live){let r={};try{const u=(await(await fetch(l)).text()).replace(/\\\\"/g,'"'),g=re=>(u.match(re)||[])[1]||"";const e=g(/"auctionEndsAt":"([^"]+)"/);
+r=[(g(/<title>([^<]+)/).replace(/ on Fanatics Collect.*$/,"").replace(/ [|].*$/,"").replace(/&#x27;|&#39;/g,"'").replace(/&quot;/g,'"').replace(/&amp;/g,"&")),g(/"name":"Grade","value":"([^"]+)"/),g(/"name":"Certification number","value":"([^"]+)"/),l,g(/"shortName":"([A-Z]+\\d+)"/),g(/"lotString":"[A-Z]+\\d+ Lot: (\\d+)"/),e?new Date(e).toLocaleDateString("en-CA",{timeZone:"America/New_York"}):""];}catch(x){r=["","","",l,"","",""];}
+rows.push(r.map(q).join(","));document.title="Grabbing "+(++n)+" of "+live.length+"…";}
+dl(rows,"fanatics-live-links");document.title="Downloaded "+live.length+" cards";return}
+const m=location.pathname.match(/\\/share\\/vault\\/([^/]+)/);if(!m){alert("Open Wheelhouse's live Fanatics auctions (or a share link) first, then click this bookmark.");return}
 const base="/share/vault/"+m[1]+"/",names={};
 document.querySelectorAll('a[href*="/share/vault/"]').forEach(a=>{const id=(a.href.match(/\\/(\\d+)$/)||[])[1],t=a.innerText.trim();if(id&&t&&!/slideshow/i.test(t))names[id]=t;});
-const ids=Object.keys(names),q=v=>'"'+String(v).replace(/"/g,'""')+'"',rows=[["Card","Grade","Cert #","Link"].map(q).join(",")];
+const ids=Object.keys(names),rows=[["Card","Grade","Cert #","Link"].map(q).join(",")];
 document.title="Grabbing 0 of "+ids.length+"…";let n=0;
 for(const id of ids){let g="",c="";try{const d=new DOMParser().parseFromString(await(await fetch(base+id)).text(),"text/html"),t=d.body.innerText;c=(t.match(/Serial Number:\\s*([A-Za-z0-9-]+)/)||[])[1]||"";g=((t.match(/Grade:\\s*([^\\n]+)/)||[])[1]||"").trim();}catch(e){}
 rows.push([names[id],g,c,location.origin+base+id].map(q).join(","));document.title="Grabbing "+(++n)+" of "+ids.length+"…";}
-const b=new Blob([rows.join("\\n")],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="fanatics-links-"+new Date().toISOString().slice(0,10)+".csv";document.body.appendChild(a);a.click();a.remove();document.title="Downloaded "+ids.length+" cards";})()`;
+dl(rows,"fanatics-links");document.title="Downloaded "+ids.length+" cards";})()`;
   const el = $("#fan-grab"); if (el) { el.href = "javascript:" + encodeURIComponent(code.replace(/\n/g, "")); el.addEventListener("click", e => { e.preventDefault(); $("#i-msg") && ($("#i-msg").textContent = "Drag “Grab Fanatics links” to your bookmarks bar, then click it on a Fanatics share page."); }); }
 })();
 function renderPayouts() {
@@ -1469,6 +1476,8 @@ const FFIELDS = [
   { k: "cert", label: "Cert #", re: /cert/i },
   { k: "title", label: "Card", re: /title|card|desc/i },
   { k: "grade", label: "Grade", re: /grade/i },
+  { k: "period", label: "Auction # (from Grab Fanatics links)", re: /^auction ?#|^auction$|auction no/i },
+  { k: "ends", label: "Auction ends", re: /^ends|end date|auction ends/i },
 ];
 // Item export from the old consignment system (one row per card ever consigned).
 const HFIELDS = [
@@ -1654,6 +1663,7 @@ function planFan() {
   return imp.rows.map(r => {
     const g = k => m[k] >= 0 ? String(r[m[k]] ?? "").trim() : "";
     const url = g("url"), title = g("title"), cert = digits(g("cert")), grade = normGrade(g("grade")), skuIn = digits(g("sku"));
+    const period = g("period").toUpperCase(), endsRaw = g("ends"), ends = /^\d{4}-\d{2}-\d{2}/.test(endsRaw) ? endsRaw.slice(0, 10) : isoDay(endsRaw).slice(0, 10);
     if (!url && !title && !cert && !skuIn) return null;
     const label = title || `Cert ${cert}`;
     const d = url ? detect(url) : null;
@@ -1665,13 +1675,14 @@ function planFan() {
     if (t) {
       used.add(t.id);
       if (!url) return { act: "skip", why: `No link yet (matches SKU ${t.sku})`, label };
-      if (t.url === url) return { act: "skip", why: `Already linked (SKU ${t.sku})`, label };
-      const patch = { url, item: d.item, plat: d.plat };
+      const fresh = (period && period !== (t.period || "")) || (ends && ends !== (t.ends || ""));
+      if (t.url === url && !fresh) return { act: "skip", why: `Already linked (SKU ${t.sku})`, label };
+      const patch = { url, item: d.item, plat: d.plat, ...(period ? { period } : {}), ...(ends ? { ends } : {}) };
       if (t.status === "curating") patch.status = "live";
       if (!digits(t.cert) && cert) patch.cert = cert;
       if ((!t.grade || t.grade === "Ungraded") && grade !== "Ungraded") patch.grade = grade;
       if (!custById(t.cust) && pick) { patch.cust = pick.cust; patch.custEmail = emailOf(pick.cust); patch.batch = pick.id; }
-      return { act: "update", how, target: t, patch, label: t.title, grade, cert };
+      return { act: "update", how, target: t, patch, label: t.title, grade, cert, period, ends };
     }
     if (!url) return { act: "skip", why: "No link, and no matching card entered", label };
     while (usedSku.has(pad6(next))) next++;
@@ -2069,6 +2080,11 @@ $("#i-go").addEventListener("click", async () => {
     $("#i-msg").textContent = `Added ${r.added} cards to the sorting list` + (r.items ? ` and updated ${r.items} cards in ${r.lots} drop-off SKU${r.lots === 1 ? "" : "s"}` : "") + ".";
     if (r.added) $("#pcsort").scrollIntoView({ block: "start" });
     return;
+  }
+  // Auction end dates that came in with the sheet also fill the Fanatics auction end-dates panel.
+  if (itype() === "fan") {
+    const add = {}; plan.forEach(p => { if (p.period && p.ends && isAuctionNo(p.period)) add[p.period] = p.ends; });
+    if (Object.keys(add).length) { try { const ends = { ...(S.fanEnds || {}), ...add }; await setDoc(doc(db, "meta", "fanAuctions"), { ends, updatedAt: now() }); S.fanEnds = ends; } catch (e) { console.error(e); } }
   }
   const res = await guarded($("#i-msg"), async () => {
     const autos = fresh.filter(p => p.auto), explicit = fresh.filter(p => !p.auto).map(p => parseInt(p.data.sku, 10));

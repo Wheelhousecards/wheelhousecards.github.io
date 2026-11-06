@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='3' width='18' height='26' rx='3' fill='%23D79431'/%3E%3Crect x='10' y='6' width='12' height='5' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="assets/app.css?v=20261106154955">
+<link rel="stylesheet" href="assets/app.css?v=20261106160636">
 </head>
 <body>
 <header><div class="wrap">
@@ -114,7 +114,7 @@
         <label class="itype"><input type="radio" name="itype" value="pcs" id="it-pcs"><span><b>PC Sportscards export</b><small>“My Consignments” export. Only the newest rows are read. Cards you already have are updated, and new cards come in for you to assign.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="fan" id="it-fan"><span><b>Fanatics export + links</b><small>Fanatics’ collection export with a Link column you add. Each row is matched to the card you already entered (by cert, then title) and goes live.</small></span></label>
       </div>
-      <div class="muted" style="font-size:12px">Have a Fanatics share link? Drag <a class="bookmarklet" id="fan-grab" href="#" title="Drag me to your bookmarks bar">Grab Fanatics links</a> to your bookmarks bar once. Then open the share link in Chrome and click that bookmark: it downloads a sheet of every card’s name, grade, cert # and link. Upload it as “Fanatics export + links” and each card is matched by cert.</div>
+      <div class="muted" style="font-size:12px"><b>Live Fanatics links in two clicks.</b> Drag <a class="bookmarklet" id="fan-grab" href="#" title="Drag me to your bookmarks bar">Grab Fanatics links</a> to your bookmarks bar once. Then open <a href="https://www.fanaticscollect.com/marketplace?type=WEEKLY&amp;featured=collection-Wheelhouse+Cards" target="_blank" rel="noopener">Wheelhouse’s live Fanatics auctions</a> and click that bookmark: it downloads every card’s live auction link, cert #, Auction # and end date. Upload it here as “Fanatics export + links”: each card is matched by cert, goes Live, and gets its Auction # and end date.</div>
       <div class="muted" style="font-size:12px">Entering cards yourself? <a href="assets/wheelhouse-card-template.xlsx" download>Download the Wheelhouse card sheet</a>, fill in one row per card, and import it as “Wheelhouse sheet”.</div>
       <label class="drop" id="drop"><input type="file" id="i-file" accept=".csv,.tsv,.txt,.xlsx,.xls"><span id="drop-t"><b>Choose a file</b> or drop it here</span></label>
       <div id="i-map" hidden style="display:grid;gap:12px">
@@ -227,6 +227,6 @@
 </div></main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="assets/staff.js?v=20261106154955"></script>
+<script type="module" src="assets/staff.js?v=20261106160636"></script>
 </body>
 </html>
