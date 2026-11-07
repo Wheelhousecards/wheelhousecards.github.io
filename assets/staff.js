@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106173156";
+import { db, logout } from "./firebase.js?v=20261106190534";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106173156";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106173156";
-import { emailSend, contact } from "./firebase-config.js?v=20261106173156";
+} from "./ui.js?v=20261106190534";
+import { setupGate, gateMarkup } from "./gate.js?v=20261106190534";
+import { emailSend, contact } from "./firebase-config.js?v=20261106190534";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1060,7 +1060,8 @@ document.title="Grabbing 0 of "+ids.length+"…";let n=0;
 for(const id of ids){let g="",c="";try{const d=new DOMParser().parseFromString(await(await fetch(base+id)).text(),"text/html"),t=d.body.innerText;c=(t.match(/Serial Number:\\s*([A-Za-z0-9-]+)/)||[])[1]||"";g=((t.match(/Grade:\\s*([^\\n]+)/)||[])[1]||"").trim();}catch(e){}
 rows.push([names[id],g,c,location.origin+base+id].map(q).join(","));document.title="Grabbing "+(++n)+" of "+ids.length+"…";}
 dl(rows,"fanatics-links");document.title="Downloaded "+ids.length+" cards";})()`;
-  const el = $("#fan-grab"); if (el) { el.href = "javascript:" + encodeURIComponent(code.replace(/\n/g, "")); el.addEventListener("click", e => { e.preventDefault(); $("#i-msg") && ($("#i-msg").textContent = "Drag “Grab Fanatics links” to your bookmarks bar, then click it on a Fanatics share page."); }); }
+  const el = $("#fan-grab"); if (el) { el.href = "javascript:" + encodeURIComponent(code.replace(/\n/g, "")); el.addEventListener("click", e => { e.preventDefault(); $("#fan-grab-msg").textContent = "That’s expected here: drag the button onto your bookmarks bar, then click the bookmark while you’re on the Fanatics page."; });
+    $("#fan-grab-copy")?.addEventListener("click", async () => { try { await navigator.clipboard.writeText(el.href); $("#fan-grab-msg").textContent = "Copied. Right-click your bookmarks bar → Add page, name it “Grab Fanatics links”, and paste into the URL box."; } catch (err) { $("#fan-grab-msg").textContent = "Your browser blocked copying. Drag the button instead."; } }); }
 })();
 function renderPayouts() {
   const rows = S.customers.map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004 || x.o.needPct).sort((a, b) => b.o.amount - a.o.amount);

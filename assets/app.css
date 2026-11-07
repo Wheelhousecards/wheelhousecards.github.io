@@ -216,3 +216,6 @@ input.auction::placeholder{text-transform:none;font-family:var(--body)}
 .csearch{min-width:220px}
 .bidlink{display:inline-block;margin-top:6px;font-size:13px;font-weight:700;color:#4472C3;text-decoration:none}
 .bidlink:hover{text-decoration:underline}
+.grabbox{font-size:12px;border:1px solid var(--line,#e2e2e2);border-radius:8px;padding:10px 12px;background:#fafafa}
+.grabbox ol{margin:6px 0 4px 18px;padding:0;display:grid;gap:4px}
+a.bookmarklet{display:inline-block;padding:3px 10px;border-radius:6px;background:#4472C3;color:#fff!important;font-weight:700;text-decoration:none;cursor:grab}
