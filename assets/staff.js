@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261106190534";
+import { db, logout } from "./firebase.js?v=20261109151327";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261106190534";
-import { setupGate, gateMarkup } from "./gate.js?v=20261106190534";
-import { emailSend, contact } from "./firebase-config.js?v=20261106190534";
+} from "./ui.js?v=20261109151327";
+import { setupGate, gateMarkup } from "./gate.js?v=20261109151327";
+import { emailSend, contact } from "./firebase-config.js?v=20261109151327";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1048,7 +1048,7 @@ $("#fa-body").addEventListener("change", async e => {
   const code = `(async()=>{const q=v=>'"'+String(v).replace(/"/g,'""')+'"',dl=(rows,name)=>{const b=new Blob([rows.join("\\n")],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name+"-"+new Date().toISOString().slice(0,10)+".csv";document.body.appendChild(a);a.click();a.remove();};
 const live=[...new Set([...document.querySelectorAll('a[href*="/weekly/"],a[href*="/premier/"],a[href*="/fixed/"]')].map(a=>a.href.split("?")[0]))];
 if(live.length&&!/\\/share\\/vault\\//.test(location.pathname)){const rows=[["Card","Grade","Cert #","Link","Auction #","Lot","Auction ends"].map(q).join(",")];let n=0;
-for(const l of live){let r={};try{const u=(await(await fetch(l)).text()).replace(/\\\\"/g,'"'),g=re=>(u.match(re)||[])[1]||"";const e=g(/"auctionEndsAt":"([^"]+)"/);
+for(const l0 of live){const l="https://www.fanaticscollect.com"+new URL(l0).pathname;let r={};try{const u=(await(await fetch(location.origin+new URL(l).pathname,{credentials:"include"})).text()).replace(/\\\\"/g,'"'),g=re=>(u.match(re)||[])[1]||"";const e=g(/"auctionEndsAt":"([^"]+)"/);
 r=[(g(/<title>([^<]+)/).replace(/ on Fanatics Collect.*$/,"").replace(/ [|].*$/,"").replace(/&#x27;|&#39;/g,"'").replace(/&quot;/g,'"').replace(/&amp;/g,"&")),g(/"name":"Grade","value":"([^"]+)"/),g(/"name":"Certification number","value":"([^"]+)"/),l,g(/"shortName":"([A-Z]+\\d+)"/),g(/"lotString":"[A-Z]+\\d+ Lot: (\\d+)"/),e?new Date(e).toLocaleDateString("en-CA",{timeZone:"America/New_York"}):""];}catch(x){r=["","","",l,"","",""];}
 rows.push(r.map(q).join(","));document.title="Grabbing "+(++n)+" of "+live.length+"…";}
 dl(rows,"fanatics-live-links");document.title="Downloaded "+live.length+" cards";return}
@@ -1676,6 +1676,9 @@ function planFan() {
   S.listings.filter(l => digits(l.cert)).sort((a, b) => (a.plat === "fan" ? 1 : 0) - (b.plat === "fan" ? 1 : 0)).forEach(l => byCert.set(digits(l.cert), l));
   const byTitle = new Map();
   S.listings.filter(l => l.plat === "fan" && !l.url).forEach(l => { const k = norm(l.title); byTitle.set(k, byTitle.has(k) ? null : l); });
+  // A card that already has this exact listing is found by its link, even when the sheet has nothing else.
+  const linkKey = u => { const m = String(u || "").match(/fanaticscollect\.com\/(weekly|premier|fixed|marketplace\/item|share\/vault\/[^/]+)\/([0-9a-z-]+)/i); return m ? (m[1] + "/" + m[2]).toLowerCase() : String(u || "").split("?")[0].replace(/\/$/, "").toLowerCase(); };
+  const byUrl = new Map(); S.all.filter(l => l.url && l.status !== "removed").forEach(l => byUrl.set(linkKey(l.url), l));
   const used = new Set(), usedSku = new Set(S.all.map(l => l.sku));
   let next = Math.max(S.topSku || 0, maxSku()) + 1;
   return imp.rows.map(r => {
@@ -1687,6 +1690,7 @@ function planFan() {
     const d = url ? detect(url) : null;
     if (url && !d) return { act: "skip", why: "Link isn’t from Fanatics Collect or eBay", label };
     let t = skuIn && S.listings.find(l => l.sku === skuIn.padStart(6, "0") && !isDropoff(l)), how = "SKU";
+    if (!t && url) { t = byUrl.get(linkKey(url)); how = "link"; }
     if (!t) { t = cert && byCert.get(cert); how = "cert"; }
     if (!t) { t = byTitle.get(norm(title)); how = "title"; }
     if (t && used.has(t.id)) return { act: "skip", why: `Same card as another row (SKU ${t.sku})`, label };
@@ -1703,6 +1707,7 @@ function planFan() {
       return { act: "update", how, target: t, patch, label: t.title, grade, cert, period, ends };
     }
     if (!url) return { act: "skip", why: "No link, and no matching card entered", label };
+    if (!title && !cert) return { act: "skip", why: "Only a link, with no card name or cert to match it to", label: url.split("/").pop().replace(/-/g, " ").slice(0, 80) };
     while (usedSku.has(pad6(next))) next++;
     const sku = pad6(next++); usedSku.add(sku);
     return { act: "new", auto: true, label, warn: pick ? "" : "No matching card. Added for you to assign.", data: { sku, cust: pick ? pick.cust : "", batch: pick ? pick.id : "", plat: d.plat, url, item: d.item, title, grade, cert, format: d.plat === "pcs" ? "auction" : "bin", price: null, ends: "", status: "live", soldDate: "" } };
