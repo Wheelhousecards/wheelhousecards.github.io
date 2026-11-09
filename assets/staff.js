@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261109181644";
+import { db, logout } from "./firebase.js?v=20261109182722";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261109181644";
-import { setupGate, gateMarkup } from "./gate.js?v=20261109181644";
-import { emailSend, contact } from "./firebase-config.js?v=20261109181644";
+} from "./ui.js?v=20261109182722";
+import { setupGate, gateMarkup } from "./gate.js?v=20261109182722";
+import { emailSend, contact } from "./firebase-config.js?v=20261109182722";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -41,7 +41,7 @@ function loadHistory() {
   return histReady;
 }
 const custHist = new Map();
-const ui = { view: "play", mode: "staff", cv: "", sel: new Set(), visible: [] };
+const ui = { view: "play", section: "cust", mode: "staff", cv: "", sel: new Set(), visible: [] };
 let me = "", unsubs = [], ready = new Set();
 const custById = id => S.customers.find(c => c.id === id);
 // Wheelhouse's own cards live under one house consignor (WH-00): tracked like any card, never paid out or emailed.
@@ -297,17 +297,24 @@ function renderLedger() {
   $("#f-batch").innerHTML = batchOptions(fb, `<option value="">All batches</option><option value="__nob"${fb === "__nob" ? " selected" : ""}>Not in a batch</option>`);
   const q = $("#f-q").value.trim().toLowerCase(), fp = $("#f-plat").value, fs = $("#f-st").value;
   const view = ui.view, past = view !== "play";
+  // Picking a consignor (e.g. from a profile) switches to the section that consignor belongs to.
+  if (fc && fc !== "__none" && custById(fc)) ui.section = isHouse(custById(fc)) ? "house" : "cust";
+  document.querySelectorAll("#sections [data-s]").forEach(x => x.setAttribute("aria-pressed", x.dataset.s === ui.section));
   const fav = $("#f-added").value, fa = fav === "today" ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString() : fav === "7d" ? new Date(Date.now() - 7 * 864e5).toISOString() : fav === "1h" ? new Date(Date.now() - 36e5).toISOString() : "";
   const loading = past && !S.hist;
   const rows = (loading ? [] : S.all).filter(l =>
     (view === "all" || view === "batch" ? l.status !== "removed" : view === "play" ? !PAST.includes(l.status) : l.status === view) &&
+    (ui.section === "house" ? isHouse(custById(l.cust)) : !isHouse(custById(l.cust))) &&
     (!fa || (l.added || "") >= fa) &&
     (!fc || (fc === "__none" ? !custById(l.cust) : l.cust === fc)) &&
     (!fp || l.plat === fp) && (!fs || l.status === fs) &&
     (!fb || (fb === "__nob" ? !batchById(l.batch) : l.batch === fb)) &&
     (!q || [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q))
   ).sort(skuDesc); // always newest SKU first
-  const viewName = { play: "in play", paid: "paid out", returned: "returned", all: "in total", removed: "removed", batch: "in total" }[view];
+  const viewName = { play: ui.section === "house" ? "on hand" : "in play", paid: ui.section === "house" ? "sold" : "paid out", returned: "returned", all: "in total", removed: "removed", batch: "in total" }[view];
+  $("#ledger-h").textContent = ui.section === "house" ? "Wheelhouse inventory" : "All consigned cards";
+  document.querySelector('#views [data-v="play"]').textContent = ui.section === "house" ? "On hand" : "In play";
+  document.querySelector('#views [data-v="paid"]').textContent = ui.section === "house" ? "Sold" : "Paid out";
   if (view === "batch") {
     // Group by batch (newest first); cards without a batch go last.
     const bOrder = new Map([...S.batches].sort((a, b) => (b.recv || "").localeCompare(a.recv || "") || b.id.localeCompare(a.id)).map((b, i) => [b.id, i]));
@@ -359,6 +366,12 @@ function setView(v) {
   renderLedger();
 }
 $("#views").addEventListener("click", e => { const v = e.target.dataset.v; if (v) setView(v); });
+// Customer consignments and Wheelhouse's own inventory are kept apart.
+document.querySelectorAll("#sections [data-s]").forEach(b => b.addEventListener("click", () => {
+  ui.section = b.dataset.s;
+  document.querySelectorAll("#sections [data-s]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  $("#f-cust").value = ""; syncFCust(); renderLedger();
+}));
 $("#f-st").addEventListener("change", e => { if (PAST.includes(e.target.value) && ui.view === "play") setView("all"); });
 $("#f-q").addEventListener("change", e => { const q = e.target.value.trim().toLowerCase(); if (q && ui.view === "play" && !S.listings.some(l => !PAST.includes(l.status) && [l.sku, l.title, l.cert].join(" ").toLowerCase().includes(q))) { setView("all"); $("#ledger-msg").textContent = "Nothing in play matched, so this shows everything, including paid-out and returned cards."; } });
 $("#c-q").addEventListener("input", renderCustList);
