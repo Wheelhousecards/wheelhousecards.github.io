@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261109151327";
+import { db, logout } from "./firebase.js?v=20261109154544";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261109151327";
-import { setupGate, gateMarkup } from "./gate.js?v=20261109151327";
-import { emailSend, contact } from "./firebase-config.js?v=20261109151327";
+} from "./ui.js?v=20261109154544";
+import { setupGate, gateMarkup } from "./gate.js?v=20261109154544";
+import { emailSend, contact } from "./firebase-config.js?v=20261109154544";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -44,6 +44,15 @@ const custHist = new Map();
 const ui = { view: "play", mode: "staff", cv: "", sel: new Set(), visible: [] };
 let me = "", unsubs = [], ready = new Set();
 const custById = id => S.customers.find(c => c.id === id);
+// Wheelhouse's own cards live under one house consignor (WH-00): tracked like any card, never paid out or emailed.
+const isHouse = c => !!(c && (c.house || c.code === "WH-00"));
+const houseCust = () => S.customers.find(isHouse);
+async function ensureHouse() {
+  const h = houseCust(); if (h) return h.id;
+  const ref = doc(col("customers"));
+  await setDoc(ref, { name: "Wheelhouse (house inventory)", code: "WH-00", house: true, email: "", phone: "", payMethod: "", payTo: "", mailing: "", payable: 0, createdAt: serverTimestamp(), createdBy: me });
+  return ref.id;
+}
 const batchById = id => S.batches.find(b => b.id === id);
 const emailOf = id => custById(id)?.email || "";
 const maxSku = () => S.all.reduce((m, l) => Math.max(m, parseInt(l.sku, 10) || 0), 0);
@@ -1064,7 +1073,7 @@ dl(rows,"fanatics-links");document.title="Downloaded "+ids.length+" cards";})()`
     $("#fan-grab-copy")?.addEventListener("click", async () => { try { await navigator.clipboard.writeText(el.href); $("#fan-grab-msg").textContent = "Copied. Right-click your bookmarks bar → Add page, name it “Grab Fanatics links”, and paste into the URL box."; } catch (err) { $("#fan-grab-msg").textContent = "Your browser blocked copying. Drag the button instead."; } }); }
 })();
 function renderPayouts() {
-  const rows = S.customers.map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004 || x.o.needPct).sort((a, b) => b.o.amount - a.o.amount);
+  const rows = S.customers.filter(c => !isHouse(c)).map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004 || x.o.needPct).sort((a, b) => b.o.amount - a.o.amount);
   $("#p-total").textContent = rows.length ? `${money(rows.reduce((s, x) => s + x.o.amount, 0))} owed to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
   $("#p-body").innerHTML = rows.length ? rows.map(({ c, o }) => {
     const canMail = !!c.email;
@@ -1674,6 +1683,16 @@ function planFan() {
   const norm = t => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const byCert = new Map();
   S.listings.filter(l => digits(l.cert)).sort((a, b) => (a.plat === "fan" ? 1 : 0) - (b.plat === "fan" ? 1 : 0)).forEach(l => byCert.set(digits(l.cert), l));
+  // Loose match on the card's name (for rows that only have a link): every meaningful word of one site card,
+  // ignoring grade words, must appear in the Fanatics title, and only one unlinked Fanatics card may qualify.
+  const STOP = new Set(["the","rc","rookie","card","base","psa","sgc","bgs","cgc","gem","mint","nm","mt","ex","auth","dna","of"]);
+  const words = t => norm(t).split(" ").filter(w => w && !STOP.has(w));
+  const fuzzyPool = S.listings.filter(l => l.plat === "fan" && !l.url && !isDropoff(l));
+  const fuzzyCard = text => {
+    const have = new Set(words(text)); if (have.size < 4) return null;
+    const hits = fuzzyPool.filter(l => { const w = words(l.title); return w.length >= 3 && w.filter(x => have.has(x)).length >= Math.max(3, Math.ceil(w.length * 0.85)); });
+    return hits.length === 1 ? hits[0] : null;
+  };
   const byTitle = new Map();
   S.listings.filter(l => l.plat === "fan" && !l.url).forEach(l => { const k = norm(l.title); byTitle.set(k, byTitle.has(k) ? null : l); });
   // A card that already has this exact listing is found by its link, even when the sheet has nothing else.
@@ -1693,6 +1712,7 @@ function planFan() {
     if (!t && url) { t = byUrl.get(linkKey(url)); how = "link"; }
     if (!t) { t = cert && byCert.get(cert); how = "cert"; }
     if (!t) { t = byTitle.get(norm(title)); how = "title"; }
+    if (!t && url && !cert) { t = fuzzyCard(title || decodeURIComponent(url.split("?")[0].split("/").pop()).replace(/-/g, " ")); how = "card name"; }
     if (t && used.has(t.id)) return { act: "skip", why: `Same card as another row (SKU ${t.sku})`, label };
     if (t) {
       used.add(t.id);
@@ -1707,10 +1727,13 @@ function planFan() {
       return { act: "update", how, target: t, patch, label: t.title, grade, cert, period, ends };
     }
     if (!url) return { act: "skip", why: "No link, and no matching card entered", label };
+    const unm = $("#i-unm")?.value || "skip";
+    if (unm === "skip") return { act: "skip", why: "Not on the site. Left out (choose above to add it)", label: title || url.split("/").pop().replace(/-/g, " ").slice(0, 80) };
     if (!title && !cert) return { act: "skip", why: "Only a link, with no card name or cert to match it to", label: url.split("/").pop().replace(/-/g, " ").slice(0, 80) };
+    const houseId = unm === "house" ? (houseCust()?.id || "__house") : "";
     while (usedSku.has(pad6(next))) next++;
     const sku = pad6(next++); usedSku.add(sku);
-    return { act: "new", auto: true, label, warn: pick ? "" : "No matching card. Added for you to assign.", data: { sku, cust: pick ? pick.cust : "", batch: pick ? pick.id : "", plat: d.plat, url, item: d.item, title, grade, cert, format: d.plat === "pcs" ? "auction" : "bin", price: null, ends: "", status: "live", soldDate: "" } };
+    return { act: "new", auto: true, label, warn: houseId ? "Added as Wheelhouse inventory" : pick ? "" : "No matching card. Added for you to assign.", data: { sku, cust: houseId || (pick ? pick.cust : ""), batch: houseId ? "" : pick ? pick.id : "", period, ends, plat: d.plat, url, item: d.item, title, grade, cert, format: d.plat === "pcs" ? "auction" : "bin", price: null, ends: "", status: "live", soldDate: "" } };
   }).filter(Boolean);
 }
 function pcsStatus(st) {
@@ -1803,7 +1826,7 @@ function planPcs() {
   return plan;
 }
 function renderPcsImport() {
-  $("#i-batchwrap").hidden = true; $("#i-pcswrap").hidden = false;
+  $("#i-batchwrap").hidden = true; $("#i-unmwrap").hidden = true; $("#i-pcswrap").hidden = false;
   $("#i-help").textContent = "New cards go into the “Sort PC Sportscards cards” list, where you add each customer’s drop-off to its own SKU. Cards you’ve already sorted get their listed, sold and payout details updated. Matching uses PC Sportscards’ card #.";
   $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Status</th><th>Sale</th></tr>";
   if (!S.hist) { $("#i-sum").textContent = "Checking for cards already in the system…"; $("#i-prev").innerHTML = ""; $("#i-go").disabled = true; return; }
@@ -1844,7 +1867,7 @@ async function runPcsImport() {
   return { added: added.length, lots: byLot.size, items: plan.filter(p => p.act === "item" || p.act === "relist").length };
 }
 function renderFanImport() {
-  $("#i-batchwrap").hidden = false;
+  $("#i-batchwrap").hidden = false; $("#i-unmwrap").hidden = false;
   $("#i-help").textContent = "Only the link, cert #, card title and grade are read. Everything else in the export is ignored. Each row is matched to a card you already entered, by cert number first, then by exact title. CGC 0 means ungraded.";
   $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Grade</th><th>Consignor</th></tr>";
   const plan = planFan(), n = a => plan.filter(p => p.act === a).length;
@@ -1995,7 +2018,7 @@ function renderImport() {
   if (type === "cust") return renderCustImport();
   if (type === "pcs") return renderPcsImport();
   if (type === "fan") return renderFanImport();
-  $("#i-batchwrap").hidden = false; $("#i-platwrap").hidden = false;
+  $("#i-batchwrap").hidden = false; $("#i-unmwrap").hidden = true; $("#i-platwrap").hidden = false;
   $("#i-help").textContent = "These were matched from your file’s headers. Fix any that are wrong. Cards already in the system (same eBay item #) get their price and status updated instead of being added twice.";
   $("#i-head").innerHTML = "<tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr>";
   const plan = planImport(), n = a => plan.filter(p => p.act === a).length;
@@ -2021,6 +2044,7 @@ document.querySelectorAll('input[name="itype"]').forEach(r => r.addEventListener
 $("#i-fields").addEventListener("change", e => { const k = e.target.dataset.k; if (k) { imp.map[k] = parseInt(e.target.value, 10); e.target.blur(); renderImport(); } });
 $("#i-batch").addEventListener("change", e => { e.target.blur(); renderImport(); });
 $("#i-plat").addEventListener("change", e => { e.target.blur(); renderImport(); });
+$("#i-unm").addEventListener("change", e => { e.target.blur(); renderImport(); });
 $("#i-cancel").addEventListener("click", () => { closeImport(); $("#i-msg").textContent = ""; });
 $("#i-unpaid").addEventListener("change", () => renderImport());
 /* import history and undo */
@@ -2118,6 +2142,7 @@ $("#i-go").addEventListener("click", async () => {
       autos.forEach(p => { while (taken.has(pad6(n))) n++; p.data.sku = pad6(n++); taken.add(p.data.sku); });
       await bump("sku", n - 1);
     } else if (explicit.length) await bump("sku", Math.max(...explicit));
+    if (fresh.some(p => p.data.cust === "__house")) { const hid = await ensureHouse(); fresh.forEach(p => { if (p.data.cust === "__house") p.data.cust = hid; }); }
     const ops = [];
     fresh.forEach(p => ops.push(["set", doc(col("listings")), { ...p.data, custEmail: emailOf(p.data.cust), added: now(), addedBy: me, updatedAt: serverTimestamp() }]));
     const before = [];
