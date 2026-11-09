@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261109154544";
+import { db, logout } from "./firebase.js?v=20261109174927";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261109154544";
-import { setupGate, gateMarkup } from "./gate.js?v=20261109154544";
-import { emailSend, contact } from "./firebase-config.js?v=20261109154544";
+} from "./ui.js?v=20261109174927";
+import { setupGate, gateMarkup } from "./gate.js?v=20261109174927";
+import { emailSend, contact } from "./firebase-config.js?v=20261109174927";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1726,8 +1726,14 @@ function planFan() {
       if (!custById(t.cust) && pick) { patch.cust = pick.cust; patch.custEmail = emailOf(pick.cust); patch.batch = pick.id; }
       return { act: "update", how, target: t, patch, label: t.title, grade, cert, period, ends };
     }
-    if (!url) return { act: "skip", why: "No link, and no matching card entered", label };
     const unm = $("#i-unm")?.value || "skip";
+    // Wheelhouse's own cards can come in without a link (e.g. the Fanatics collection export): added as being curated.
+    if (!url && unm === "house" && (title || cert)) {
+      while (usedSku.has(pad6(next))) next++;
+      const sku = pad6(next++); usedSku.add(sku);
+      return { act: "new", auto: true, label, warn: "Added as Wheelhouse inventory", data: { sku, cust: houseCust()?.id || "__house", batch: "", plat: "fan", url: "", item: "", title, grade, cert, format: "auction", price: null, ends: "", status: "curating", soldDate: "" } };
+    }
+    if (!url) return { act: "skip", why: "No link, and no matching card entered", label };
     if (unm === "skip") return { act: "skip", why: "Not on the site. Left out (choose above to add it)", label: title || url.split("/").pop().replace(/-/g, " ").slice(0, 80) };
     if (!title && !cert) return { act: "skip", why: "Only a link, with no card name or cert to match it to", label: url.split("/").pop().replace(/-/g, " ").slice(0, 80) };
     const houseId = unm === "house" ? (houseCust()?.id || "__house") : "";

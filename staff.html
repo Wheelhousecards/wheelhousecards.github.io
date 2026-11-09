@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='3' width='18' height='26' rx='3' fill='%23D79431'/%3E%3Crect x='10' y='6' width='12' height='5' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="assets/app.css?v=20261109154544">
+<link rel="stylesheet" href="assets/app.css?v=20261109174927">
 </head>
 <body>
 <header><div class="wrap">
@@ -114,17 +114,7 @@
         <label class="itype"><input type="radio" name="itype" value="pcs" id="it-pcs"><span><b>PC Sportscards export</b><small>“My Consignments” export. Only the newest rows are read. Cards you already have are updated, and new cards come in for you to assign.</small></span></label>
         <label class="itype"><input type="radio" name="itype" value="fan" id="it-fan"><span><b>Fanatics export + links</b><small>Fanatics’ collection export with a Link column you add. Each row is matched to the card you already entered (by cert, then title) and goes live.</small></span></label>
       </div>
-      <div class="grabbox">
-        <div><b>Live Fanatics links in two clicks.</b> This is a bookmark button, so clicking it here does nothing. Set it up once:</div>
-        <ol>
-          <li>Show your bookmarks bar in Chrome (<b>Ctrl+Shift+B</b>, or Cmd+Shift+B on Mac).</li>
-          <li>Drag this button up onto the bookmarks bar: <a class="bookmarklet" id="fan-grab" href="#" title="Drag me to your bookmarks bar" draggable="true">⇱ Grab Fanatics links</a>
-            <span class="muted">Can’t drag? <button class="linkbtn" type="button" id="fan-grab-copy">Copy it</button>, then right-click the bookmarks bar → Add page, name it “Grab Fanatics links” and paste into the URL box.</span></li>
-          <li>Each week, open <a href="https://www.fanaticscollect.com/marketplace?type=WEEKLY&amp;featured=collection-Wheelhouse+Cards" target="_blank" rel="noopener">Wheelhouse’s live Fanatics auctions</a> (or a consignor’s collection page) and click the bookmark there. A sheet downloads with every card’s link, cert #, Auction # and end date.</li>
-          <li>Upload that sheet here as “Fanatics export + links”.</li>
-        </ol>
-        <div class="detect" id="fan-grab-msg" role="status"></div>
-      </div>
+      <div class="grabbox"><a class="bookmarklet" id="fan-grab" href="#" title="Drag me to your bookmarks bar" draggable="true">⇱ Grab Fanatics links</a> <button class="linkbtn" type="button" id="fan-grab-copy">Copy</button> <span class="detect" id="fan-grab-msg" role="status"></span></div>
       <div class="muted" style="font-size:12px">Entering cards yourself? <a href="assets/wheelhouse-card-template.xlsx" download>Download the Wheelhouse card sheet</a>, fill in one row per card, and import it as “Wheelhouse sheet”.</div>
       <label class="drop" id="drop"><input type="file" id="i-file" accept=".csv,.tsv,.txt,.xlsx,.xls"><span id="drop-t"><b>Choose a file</b> or drop it here</span></label>
       <div id="i-map" hidden style="display:grid;gap:12px">
@@ -238,6 +228,6 @@
 </div></main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="assets/staff.js?v=20261109154544"></script>
+<script type="module" src="assets/staff.js?v=20261109174927"></script>
 </body>
 </html>
