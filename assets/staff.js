@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261109174927";
+import { db, logout } from "./firebase.js?v=20261109181644";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261109174927";
-import { setupGate, gateMarkup } from "./gate.js?v=20261109174927";
-import { emailSend, contact } from "./firebase-config.js?v=20261109174927";
+} from "./ui.js?v=20261109181644";
+import { setupGate, gateMarkup } from "./gate.js?v=20261109181644";
+import { emailSend, contact } from "./firebase-config.js?v=20261109181644";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1055,10 +1055,10 @@ $("#fa-body").addEventListener("change", async e => {
    opens each card's page for its cert #, and downloads a CSV for Import → Fanatics export + links. */
 (() => {
   const code = `(async()=>{const q=v=>'"'+String(v).replace(/"/g,'""')+'"',dl=(rows,name)=>{const b=new Blob([rows.join("\\n")],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name+"-"+new Date().toISOString().slice(0,10)+".csv";document.body.appendChild(a);a.click();a.remove();};
-const live=[...new Set([...document.querySelectorAll('a[href*="/weekly/"],a[href*="/premier/"],a[href*="/fixed/"]')].map(a=>a.href.split("?")[0]))];
-if(live.length&&!/\\/share\\/vault\\//.test(location.pathname)){const rows=[["Card","Grade","Cert #","Link","Auction #","Lot","Auction ends"].map(q).join(",")];let n=0;
+const live=[...new Set([...document.querySelectorAll('a[href*="/weekly/"],a[href*="/premier/"],a[href*="/fixed/"],a[href*="/buy-now/"]')].map(a=>a.href.split("?")[0]))];
+if(live.length&&!/\\/share\\/vault\\//.test(location.pathname)){const rows=[["Card","Grade","Cert #","Link","Auction #","Lot","Auction ends","Price"].map(q).join(",")];let n=0;
 for(const l0 of live){const l="https://www.fanaticscollect.com"+new URL(l0).pathname;let r={};try{const u=(await(await fetch(location.origin+new URL(l).pathname,{credentials:"include"})).text()).replace(/\\\\"/g,'"'),g=re=>(u.match(re)||[])[1]||"";const e=g(/"auctionEndsAt":"([^"]+)"/);
-r=[(g(/<title>([^<]+)/).replace(/ on Fanatics Collect.*$/,"").replace(/ [|].*$/,"").replace(/&#x27;|&#39;/g,"'").replace(/&quot;/g,'"').replace(/&amp;/g,"&")),g(/"name":"Grade","value":"([^"]+)"/),g(/"name":"Certification number","value":"([^"]+)"/),l,g(/"shortName":"([A-Z]+\\d+)"/),g(/"lotString":"[A-Z]+\\d+ Lot: (\\d+)"/),e?new Date(e).toLocaleDateString("en-CA",{timeZone:"America/New_York"}):""];}catch(x){r=["","","",l,"","",""];}
+r=[(g(/<title>([^<]+)/).replace(/ on Fanatics Collect.*$/,"").replace(/ [|].*$/,"").replace(/&#x27;|&#39;/g,"'").replace(/&quot;/g,'"').replace(/&amp;/g,"&")),g(/"name":"Grade","value":"([^"]+)"/),g(/"name":"Certification number","value":"([^"]+)"/),l,g(/"shortName":"([A-Z]+\\d+)"/),g(/"lotString":"[A-Z]+\\d+ Lot: (\\d+)"/),e?new Date(e).toLocaleDateString("en-CA",{timeZone:"America/New_York"}):"",/\\/buy-now\\//.test(l)?g(/"offers":\\{[^}]*?"price":"?([\\d.]+)/):""];}catch(x){r=["","","",l,"","","",""];}
 rows.push(r.map(q).join(","));document.title="Grabbing "+(++n)+" of "+live.length+"…";}
 dl(rows,"fanatics-live-links");document.title="Downloaded "+live.length+" cards";return}
 const m=location.pathname.match(/\\/share\\/vault\\/([^/]+)/);if(!m){alert("Open Wheelhouse's live Fanatics auctions (or a share link) first, then click this bookmark.");return}
@@ -1505,6 +1505,7 @@ const FFIELDS = [
   { k: "grade", label: "Grade", re: /grade/i },
   { k: "period", label: "Auction # (from Grab Fanatics links)", re: /^auction ?#|^auction$|auction no/i },
   { k: "ends", label: "Auction ends", re: /^ends|end date|auction ends/i },
+  { k: "price", label: "Buy It Now price", re: /^(asking |buy it now |bin )?price$/i },
 ];
 // Item export from the old consignment system (one row per card ever consigned).
 const HFIELDS = [
@@ -1696,7 +1697,7 @@ function planFan() {
   const byTitle = new Map();
   S.listings.filter(l => l.plat === "fan" && !l.url).forEach(l => { const k = norm(l.title); byTitle.set(k, byTitle.has(k) ? null : l); });
   // A card that already has this exact listing is found by its link, even when the sheet has nothing else.
-  const linkKey = u => { const m = String(u || "").match(/fanaticscollect\.com\/(weekly|premier|fixed|marketplace\/item|share\/vault\/[^/]+)\/([0-9a-z-]+)/i); return m ? (m[1] + "/" + m[2]).toLowerCase() : String(u || "").split("?")[0].replace(/\/$/, "").toLowerCase(); };
+  const linkKey = u => { const m = String(u || "").match(/fanaticscollect\.com\/(weekly|premier|fixed|buy-now|marketplace\/item|share\/vault\/[^/]+)\/([0-9a-z-]+)/i); return m ? (m[1] + "/" + m[2]).toLowerCase() : String(u || "").split("?")[0].replace(/\/$/, "").toLowerCase(); };
   const byUrl = new Map(); S.all.filter(l => l.url && l.status !== "removed").forEach(l => byUrl.set(linkKey(l.url), l));
   const used = new Set(), usedSku = new Set(S.all.map(l => l.sku));
   let next = Math.max(S.topSku || 0, maxSku()) + 1;
@@ -1717,9 +1718,10 @@ function planFan() {
     if (t) {
       used.add(t.id);
       if (!url) return { act: "skip", why: `No link yet (matches SKU ${t.sku})`, label };
-      const fresh = (period && period !== (t.period || "")) || (ends && ends !== (t.ends || ""));
+      const fresh = (period && period !== (t.period || "")) || (ends && ends !== (t.ends || "")) || (/\/buy-now\//i.test(url) && t.format !== "bin");
       if (t.url === url && !fresh) return { act: "skip", why: `Already linked (SKU ${t.sku})`, label };
-      const patch = { url, item: d.item, plat: d.plat, ...(period ? { period } : {}), ...(ends ? { ends } : {}) };
+      const bin = /\/buy-now\//i.test(url), pr = parseFloat(g("price").replace(/[^0-9.]/g, ""));
+      const patch = { url, item: d.item, plat: d.plat, ...(period ? { period } : {}), ...(ends ? { ends } : {}), ...(bin ? { format: "bin", period: t.period && !isAuctionNo(t.period) ? t.period : "BIN", ends: "" } : {}), ...(bin && pr > 0 ? { price: pr } : {}) };
       if (t.status === "curating") patch.status = "live";
       if (!digits(t.cert) && cert) patch.cert = cert;
       if ((!t.grade || t.grade === "Ungraded") && grade !== "Ungraded") patch.grade = grade;
