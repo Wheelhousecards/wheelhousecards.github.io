@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261109183630";
+import { db, logout } from "./firebase.js?v=20261109185256";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261109183630";
-import { setupGate, gateMarkup } from "./gate.js?v=20261109183630";
-import { emailSend, contact } from "./firebase-config.js?v=20261109183630";
+} from "./ui.js?v=20261109185256";
+import { setupGate, gateMarkup } from "./gate.js?v=20261109185256";
+import { emailSend, contact } from "./firebase-config.js?v=20261109185256";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -321,7 +321,9 @@ function renderLedger() {
     rows.sort((a, b) => (bOrder.get(a.batch) ?? 1e9) - (bOrder.get(b.batch) ?? 1e9) || skuDesc(a, b));
   }
   $("#bb-del").hidden = view === "removed"; $("#bb-restore").hidden = view !== "removed"; $("#bb-purge").hidden = view !== "removed";
-  $("#count").textContent = loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
+  // A search that finds nothing here but matches cards in the other section says so.
+  const other = q && !rows.length && !loading ? S.all.filter(l => l.status !== "removed" && (ui.section === "house" ? !isHouse(custById(l.cust)) : isHouse(custById(l.cust))) && [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q)).length : 0;
+  $("#count").textContent = other ? `No matches here · ${other} in ${ui.section === "house" ? "Customer consignments" : "Wheelhouse inventory"}` : loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
   $("#th-price").textContent = view === "paid" ? "Sale / to consignor" : "Price / bid";
   $("#th-when").textContent = "Auction #";
   ui.visible = rows.map(l => l.id);
@@ -400,7 +402,11 @@ $("#addForm").addEventListener("submit", async e => {
   if (manual) {
     if (!/^\d{6}$/.test(typed)) return say("SKU must be six digits, like 000123.");
     const dup = S.listings.find(l => l.sku === typed);
-    if (dup) return say(`SKU ${typed} is already used for ${dup.title}. Pick another SKU.`);
+    if (dup) {
+      // Hand back the next free SKU so they can just click Add again.
+      delete $("#a-sku").dataset.manual; $("#a-sku").value = nextSku();
+      return say(`SKU ${typed} is already used by ${dup.title}${isHouse(custById(dup.cust)) ? " (in Wheelhouse inventory)" : ""}. Switched to the next free SKU, ${$("#a-sku").value}. Click Add listing again.`);
+    }
   }
   const grade = normGrade($("#a-grade").value), cert = $("#a-cert").value.trim();
   if (grade !== "Ungraded" && !cert) return say(`Enter the cert number for this ${grade} card, or clear the grade if it’s ungraded.`);
