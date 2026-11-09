@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261109182722";
+import { db, logout } from "./firebase.js?v=20261109183630";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261109182722";
-import { setupGate, gateMarkup } from "./gate.js?v=20261109182722";
-import { emailSend, contact } from "./firebase-config.js?v=20261109182722";
+} from "./ui.js?v=20261109183630";
+import { setupGate, gateMarkup } from "./gate.js?v=20261109183630";
+import { emailSend, contact } from "./firebase-config.js?v=20261109183630";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1856,13 +1856,13 @@ function renderPcsImport() {
   const flagN = st => plan.filter(p => p.act === "item" && p.patch.status === st).length;
   $("#i-sum").innerHTML = `Read the newest ${(recent ? Math.min(recent, imp.rows.length) : imp.rows.length).toLocaleString()} of ${imp.rows.length.toLocaleString()} rows · <span class="act-new">${n("pool")} new to sort</span> · <span class="act-upd">${n("item")} updates to sorted cards</span>${n("relist") ? ` · <span class="act-upd">${n("relist")} relisted cards matched to their drop-off</span>` : ""}${flagN("awaiting") ? ` · <span class="need">${flagN("awaiting")} sold, awaiting payment</span>` : ""}${flagN("cancelled") ? ` · <span class="need">${flagN("cancelled")} sales cancelled</span>` : ""}${n("poolupd") ? ` · ${n("poolupd")} updates to unsorted cards` : ""} · ${plan.filter(p => p.same).length} unchanged · <span class="act-skip">${plan.filter(p => p.early).length} paid before the cutoff</span>`;
   const order = { item: 0, relist: 0, pool: 1, poolupd: 2, skip: 3 };
-  $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).slice(0, 12).map(p => {
+  $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).map(p => {
     const r = p.row;
     const act = p.act === "pool" ? `<span class="act-new">New · to sort</span>` : p.act === "item" ? `<span class="act-upd">SKU ${esc(p.lot.sku)}: ${esc(p.change)}</span>` : p.act === "relist" ? `<span class="act-upd">SKU ${esc(p.lot.sku)}: relist of PC #${esc(p.oldId)}</span>` : p.act === "poolupd" ? `<span class="act-upd">Unsorted: updated</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
     const st = r ? ITEM_STAT[r.status] : p.patch?.status ? ITEM_STAT[p.patch.status] : "";
     const sale = r && (r.status === "sold" || r.status === "awaiting") ? `${money(r.price)}<div class="cert">${money(r.net)} after fees</div>` : "";
     return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td>${st}</td><td class="num">${sale}</td></tr>`;
-  }).join("") + (plan.length > 12 ? `<tr><td colspan="4" class="muted">…and ${(plan.length - 12).toLocaleString()} more rows</td></tr>` : "");
+  }).join("");
   const go = n("pool") + n("item") + n("poolupd") + n("relist");
   $("#i-go").disabled = !go;
   $("#i-go").textContent = go ? (n("pool") ? `Add ${n("pool")} to the sorting list` : "Save updates") + (n("item") + n("relist") ? ` and update ${n("item") + n("relist")} sorted cards` : "") : "Nothing new";
@@ -1895,12 +1895,12 @@ function renderFanImport() {
   const unassigned = plan.filter(p => p.act === "new" && !p.data.cust).length;
   $("#i-sum").innerHTML = `<span class="act-upd">${n("update")} matched and linked</span> · <span class="act-new">${n("new")} not entered yet</span> · <span class="act-skip">${n("skip")} skipped</span>${unassigned ? ` · <span class="need">${unassigned} will need a consignor</span>` : ""}`;
   const order = { update: 0, new: 1, skip: 2 };
-  $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).slice(0, 12).map(p => {
+  $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).map(p => {
     const c = p.act === "update" ? custById(p.target.cust) : p.data ? custById(p.data.cust) : null;
     const act = p.act === "update" ? `<span class="act-upd">Links SKU ${esc(p.target.sku)}</span><div class="cert">matched by ${p.how}</div>` : p.act === "new" ? `<span class="act-new">New · SKU ${p.data.sku}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
     const gl = p.act === "update" ? { grade: p.patch.grade || p.target.grade, cert: p.patch.cert || p.target.cert } : p.data;
     return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td>${gl ? gradeHtml(gl, true) : ""}</td><td>${p.act === "skip" ? "" : c ? esc(c.name) : '<span class="need">Needs consignor</span>'}${p.warn ? `<div class="cert" style="white-space:normal">${esc(p.warn)}</div>` : ""}</td></tr>`;
-  }).join("") + (plan.length > 12 ? `<tr><td colspan="4" class="muted">…and ${plan.length - 12} more rows</td></tr>` : "");
+  }).join("");
   const go = n("update") + n("new");
   $("#i-go").disabled = !go;
   $("#i-go").textContent = go ? `Link ${n("update")} card${n("update") === 1 ? "" : "s"}` + (n("new") ? ` and add ${n("new")}` : "") : "Nothing to import";
@@ -2001,11 +2001,11 @@ function renderHistImport() {
   $("#i-unpaid-note").textContent = stats.unpaid ? ` The file marks ${stats.unpaid.toLocaleString()} sold cards as not paid (${money(stats.unpaidAmt)} to consignors), mostly from past years. Leave this off to treat them as paid out, so customers only see what’s owed on their consignor record. ${stats.unpaidRecent} of them sold this year (${money(stats.unpaidRecentAmt)}).` : "";
   $("#i-sum").innerHTML = `<span class="act-new">${fresh.length.toLocaleString()} cards to bring in</span>: ${n("paid").toLocaleString()} paid out, ${n("sold")} sold awaiting payout, ${n("returned")} returned, ${n("curating")} still out (shown as Being curated until linked) · <span class="act-skip">${(plan.length - fresh.length).toLocaleString()} skipped</span> (${stats.retail.toLocaleString()} retail${plan.some(p => p.old) ? `, ${plan.filter(p => p.old).length.toLocaleString()} older than your limit` : ""})${noCust ? ` · <span class="need">${noCust} without a matching consignor</span>` : ""}${clash ? ` · <span class="need">${clash} SKUs already used by cards you added in the new app. Delete or renumber those cards first.</span>` : ""}`;
   const order = p => p.act === "new" ? (p.warn ? 0 : 1) : p.clash ? 0 : 2;
-  $("#i-prev").innerHTML = [...plan].sort((a, b) => order(a) - order(b)).slice(0, 12).map(p => {
+  $("#i-prev").innerHTML = [...plan].sort((a, b) => order(a) - order(b)).map(p => {
     const d = p.data;
     const act = p.act === "new" ? `<span class="act-new">SKU ${esc(p.sku)} · ${STAT[p.status]}</span>` : p.act === "update" ? `<span class="act-upd">Updates SKU ${esc(p.sku)}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
     return `<tr><td>${act}</td><td class="title">${esc(p.label)}${d ? `<div class="cert">${PLAT[d.plat]}${d.period ? ` · ${esc(d.period)}` : ""}${d.lotCount ? ` · ${d.lotCount} cards` : ""}</div>` : ""}</td><td>${d ? gradeHtml(d, true) : ""}</td><td>${d ? (p.cust ? esc(p.cust.name) : '<span class="need">Not found</span>') : ""}${p.warn ? `<div class="cert" style="white-space:normal">${esc(p.warn)}</div>` : ""}</td><td class="num">${d && d.payout != null ? `${money(d.price)}<div class="cert">${money(d.payout)} to consignor</div>` : ""}</td></tr>`;
-  }).join("") + (plan.length > 12 ? `<tr><td colspan="5" class="muted">…and ${(plan.length - 12).toLocaleString()} more rows</td></tr>` : "");
+  }).join("");
   if (ups) $("#i-sum").innerHTML += ` · <span class="act-upd">${ups.toLocaleString()} already-imported cards get their payout month or lot size</span>`;
   $("#i-go").disabled = !fresh.length && !ups;
   $("#i-go").textContent = fresh.length ? `Bring in ${fresh.length.toLocaleString()} cards` : ups ? `Update ${ups.toLocaleString()} cards` : "Nothing to import";
@@ -2018,11 +2018,11 @@ function renderCustImport() {
   const fresh = plan.filter(p => p.act === "new");
   const noEmail = fresh.filter(p => !p.data.email).length, noPay = fresh.filter(p => !p.data.payMethod).length, owed = fresh.reduce((s, p) => s + (p.data.payable || 0), 0);
   $("#i-sum").innerHTML = `<span class="act-new">${n("new")} new consignor${n("new") === 1 ? "" : "s"}</span> · <span class="act-skip">${n("skip")} skipped</span>${noEmail ? ` · <span class="need">${noEmail} without an email</span>` : ""}${noPay ? ` · <span class="need">${noPay} without a payout method</span>` : ""}${owed ? ` · ${money(owed)} payable carried over` : ""}`;
-  $("#i-prev").innerHTML = plan.slice(0, 10).map(p => {
+  $("#i-prev").innerHTML = plan.map(p => {
     const d = p.data;
     const act = p.act === "new" ? `<span class="act-new">New · ${esc(d.code)}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
     return `<tr><td>${act}</td><td class="title">${esc(p.label)}${d && d.phone ? `<div class="cert">${esc(d.phone)}</div>` : ""}</td><td style="overflow-wrap:anywhere">${esc(p.email || "")}${p.warn ? `<div class="cert" style="white-space:normal">${esc(p.warn)}</div>` : ""}</td><td class="num">${d ? d.rate + "%" : ""}</td><td style="max-width:220px;overflow-wrap:anywhere">${d ? esc(payLine(d)) : ""}</td><td class="num">${d && d.payable ? money(d.payable) : ""}</td></tr>`;
-  }).join("") + (plan.length > 10 ? `<tr><td colspan="6" class="muted">…and ${plan.length - 10} more rows</td></tr>` : "");
+  }).join("");
   $("#i-go").disabled = !n("new");
   $("#i-go").textContent = n("new") ? `Add ${n("new")} consignor${n("new") === 1 ? "" : "s"}` : "Nothing to add";
 }
@@ -2045,12 +2045,12 @@ function renderImport() {
   const plan = planImport(), n = a => plan.filter(p => p.act === a).length;
   const unassigned = plan.filter(p => p.act === "new" && !p.data.cust).length;
   $("#i-sum").innerHTML = `<span class="act-new">${n("new")} new</span> · <span class="act-upd">${n("update")} update cards already listed</span> · <span class="act-skip">${n("skip")} skipped</span>${unassigned ? ` · <span class="need">${unassigned} will need a consignor</span>` : ""}`;
-  $("#i-prev").innerHTML = plan.slice(0, 8).map(p => {
+  $("#i-prev").innerHTML = plan.map(p => {
     const d = p.data, c = d && custById(d.cust);
     const act = p.act === "new" ? `<span class="act-new">New · SKU ${d.sku}${p.auto ? "*" : ""}</span>` : p.act === "update" ? `<span class="act-upd">Updates SKU ${esc(p.target.sku)}</span>` : `<span class="act-skip">Skip: ${esc(p.why)}</span>`;
     const who = d ? (c ? esc(c.name) : '<span class="need">Needs consignor</span>') : "";
     return `<tr><td>${act}</td><td class="title">${esc(p.label)}</td><td>${d ? gradeHtml(d, true) : ""}</td><td class="num">${d ? money(d.price) : p.act === "update" ? money(p.price) : ""}</td><td>${who}${p.warn ? `<div class="cert">${esc(p.warn)}</div>` : ""}</td></tr>`;
-  }).join("") + (plan.length > 8 ? `<tr><td colspan="5" class="muted">…and ${plan.length - 8} more rows</td></tr>` : "");
+  }).join("");
   const go = n("new") + n("update");
   $("#i-go").disabled = !go;
   $("#i-go").textContent = go ? `Import ${n("new")} new` + (n("update") ? ` and update ${n("update")}` : "") : "Nothing to import";

@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='3' width='18' height='26' rx='3' fill='%23D79431'/%3E%3Crect x='10' y='6' width='12' height='5' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="assets/app.css?v=20261109182722">
+<link rel="stylesheet" href="assets/app.css?v=20261109183630">
 </head>
 <body>
 <header><div class="wrap">
@@ -130,7 +130,7 @@
         <div id="i-limitwrap" hidden style="display:grid;gap:4px;max-width:420px"><label for="i-limit">Bring in</label><select id="i-limit"><option value="0">Every card in the file</option><option value="1500">Most recent 1,500 cards</option><option value="500">Most recent 500 cards</option></select><span class="muted" style="font-size:12px">Cards still out and cards awaiting payout always come in. Older paid-out and returned cards are left off when you pick a limit.</span></div>
         <label class="itype" id="i-optwrap" hidden style="padding:8px 10px"><input type="checkbox" id="i-unpaid"><span>Count sales marked <b>Paid (Yes?) = No</b> as still owed<small id="i-unpaid-note"></small></span></label>
         <div id="i-sum" style="font-size:13px"></div>
-        <div class="tbl-wrap"><table class="prev"><thead id="i-head"><tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr></thead><tbody id="i-prev"></tbody></table></div>
+        <div class="tbl-wrap" style="max-height:560px;overflow:auto"><table class="prev"><thead id="i-head"><tr><th>Result</th><th>Card</th><th>Grade</th><th>Price</th><th>Consignor</th></tr></thead><tbody id="i-prev"></tbody></table></div>
         <div class="row"><button class="btn" type="button" id="i-go">Import</button><button class="btn ghost" type="button" id="i-cancel">Cancel</button></div>
       </div>
       <div class="detect" id="i-msg" role="status"></div>
@@ -232,6 +232,6 @@
 </div></main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="assets/staff.js?v=20261109182722"></script>
+<script type="module" src="assets/staff.js?v=20261109183630"></script>
 </body>
 </html>

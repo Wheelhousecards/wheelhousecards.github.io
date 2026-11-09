@@ -40,7 +40,7 @@ export function cardSplit(l, c) {
 // Fanatics Collect charges a $5 service fee on every ungraded card (entered as Ungraded, or "CGC AUTH" in the title).
 // It comes off the sale price before the split.
 export const FAN_RAW_FEE = 5;
-export const isUngraded = l => !l.grade || /ungraded|cgc\s*auth/i.test(l.grade) || /cgc\s*auth/i.test(l.title || "");
+export const isUngraded = l => isRawGrade(l.grade) || /cgc\s*auth/i.test(l.title || "");
 export const cardFee = l => l.plat === "fan" && isUngraded(l) && l.net == null ? FAN_RAW_FEE : 0;
 export const cardPayout = (l, c) => { if (l.payout != null) return l.payout; const p = cardSplit(l, c); return p == null ? null : Math.max(0, (l.net != null ? l.net : (l.price || 0)) - cardFee(l)) * p / 100; };
 const has = v => v != null && v !== "" && !isNaN(+v);
@@ -98,14 +98,15 @@ export function detect(url) {
   return null;
 }
 
+// Authentic-only cards (no numeric grade) count as Ungraded: "CGC 0", "PSA/DNA 0", "Authenticated", "CGC AUTH", "PSA A".
+export const isRawGrade = g => { g = String(g || "").trim(); return !g || /^(raw|ungraded|none|n\/?a)$/i.test(g) || /^[a-z/]+\s*0$/i.test(g) || /auth/i.test(g) || /^[a-z/]+\s+a$/i.test(g); };
 export function normGrade(g) {
   g = String(g || "").trim();
-  // Fanatics exports list ungraded (authentic-only) cards as "CGC 0".
-  return !g || /^(raw|ungraded|none|n\/?a)$/i.test(g) || /^[a-z]+\s*0$/i.test(g) ? "Ungraded" : g;
+  return isRawGrade(g) ? "Ungraded" : g;
 }
 
 export function gradeHtml(l, stack) {
-  if (!l.grade || l.grade === "Ungraded") {
+  if (isRawGrade(l.grade)) {
     const raw = `<span class="slab raw">Ungraded</span>`, c = l.cert ? `<span class="cert">Cert ${esc(l.cert)}</span>` : "";
     return stack && c ? `<div class="gcell">${raw}${c}</div>` : raw + c;
   }
