@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261110152811";
+import { db, logout } from "./firebase.js?v=20261110160805";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261110152811";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110152811";
-import { emailSend, contact } from "./firebase-config.js?v=20261110152811";
+} from "./ui.js?v=20261110160805";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110160805";
+import { emailSend, contact } from "./firebase-config.js?v=20261110160805";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -563,7 +563,7 @@ function openDropDetail(l) {
       <div class="f w6"><h3>Edit</h3></div>
       <div class="f"><label for="dx-date">Dropped off</label><input id="dx-date" type="date" value="${v(l.dropDate)}"></div>
       <div class="f"><label for="dx-n">Cards dropped off</label><input id="dx-n" type="number" min="0" step="1" value="${l.expected || ""}"></div>
-      <div class="f"><label for="dx-pct">Customer’s % of PC payout</label><input id="dx-pct" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="${splitOf(custById(l.cust), "pcsRate")}% (their rate)"></div>
+      <div class="f"><label for="dx-pct">Customer’s % of sale price</label><input id="dx-pct" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="${splitOf(custById(l.cust), "pcsRate")}% (their rate)"></div>
       <div class="f"><label for="dx-batch">PC batch</label><select id="dx-batch"><option value="">No batch</option>${pcsBatches(l.cust).map(b => `<option value="${b.id}"${b.id === l.batch ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join("")}</select></div>
       <div class="f w6"><label for="dx-cust">Customer</label><select id="dx-cust">${custOptions(l.cust)}</select></div>
       <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="dx-fmsg" role="status"></span></div></div>

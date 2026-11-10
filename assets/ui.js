@@ -19,7 +19,7 @@ export function payLine(c) {
   return PAYM[c.payMethod] + (c.payTo ? ` ${c.payTo}` : "");
 }
 // The consignor's share of one sale. Cards imported from the old system carry their exact portion.
-// PC Sportscards cards carry their payout after PC Sportscards' fees (net); the consignor's split applies to that.
+// PC Sportscards cards carry their payout after PC Sportscards' fees (net), but the consignor's split applies to the sale price.
 /* Payout splits, per card:
    - Fanatics Collect: 100% when the card sells for $200 or more, 90% under $200.
    - PC Sportscards: a flat 95% of what PC Sportscards pays after its fees.
@@ -28,7 +28,7 @@ export function payLine(c) {
    (from the old system) overrides both. */
 // Fixed splits for everyone (staff-only; customers never see a %). Fanatics Collect: 100% at $200 and up, 90% under $200.
 // A single card can still be given its own split from its detail view.
-// PC Sportscards: 80% of PC's payout, unless the consignor has a preferred rate (pcsPct), or a drop-off / card is set by hand.
+// PC Sportscards: 80% of the sale price, unless the consignor has a preferred rate (pcsPct), or a drop-off / card is set by hand.
 export const SPLIT_DEFAULTS = { fanHi: 100, fanLo: 90, pcsRate: 80, rate: 100 };
 export const splitOf = (c, k) => k === "pcsRate" && c?.pcsPct != null && c.pcsPct !== "" && !isNaN(+c.pcsPct) ? +c.pcsPct : SPLIT_DEFAULTS[k];
 export const splitLine = () => "Fanatics Collect 100% at $200+, 90% under $200";
@@ -43,7 +43,7 @@ export function cardSplit(l, c) {
 export const FAN_RAW_FEE = 5;
 export const isUngraded = l => isRawGrade(l.grade) || /cgc\s*auth/i.test(l.title || "");
 export const cardFee = l => l.plat === "fan" && isUngraded(l) && l.net == null ? FAN_RAW_FEE : 0;
-export const cardPayout = (l, c) => { if (l.payout != null) return l.payout; const p = cardSplit(l, c); return p == null ? null : Math.max(0, (l.net != null ? l.net : (l.price || 0)) - cardFee(l)) * p / 100; };
+export const cardPayout = (l, c) => { if (l.payout != null) return l.payout; const p = cardSplit(l, c); return p == null ? null : Math.max(0, (l.net != null && l.plat !== "pcs" ? l.net : (l.price || 0)) - cardFee(l)) * p / 100; };
 const has = v => v != null && v !== "" && !isNaN(+v);
 // money for a share that may not be known yet
 export const shareText = (v, staff) => v == null ? (staff ? '<span class="need">Set PC %</span>' : '<span class="muted">Pending</span>') : money(v);
@@ -71,7 +71,7 @@ export function ebayFind(x) {
   return `https://www.ebay.com/sch/i.html?_nkw=${q}${PCS_SELLER ? `&_ssn=${encodeURIComponent(PCS_SELLER)}` : ""}${done ? "&LH_Sold=1&LH_Complete=1" : ""}${p}`;
 }
 export const itemPct = (x, lot, c) => has(x.split) ? +x.split : has(lot?.split) ? +lot.split : splitOf(c, "pcsRate");
-export const itemShare = (x, c, lot) => { const p = itemPct(x, lot, c); return p == null ? null : (x.net != null ? x.net : (x.price || 0)) * p / 100; };
+export const itemShare = (x, c, lot) => { const p = itemPct(x, lot, c); return p == null ? null : (x.price || 0) * p / 100; }; // PC Sportscards: % of the sale price
 export function dropoffSummary(items = []) {
   const n = k => items.filter(x => x.status === k).length;
   const soldItems = items.filter(x => x.status === "sold" || x.status === "paid");
