@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261109185256";
+import { db, logout } from "./firebase.js?v=20261110130630";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261109185256";
-import { setupGate, gateMarkup } from "./gate.js?v=20261109185256";
-import { emailSend, contact } from "./firebase-config.js?v=20261109185256";
+} from "./ui.js?v=20261110130630";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110130630";
+import { emailSend, contact } from "./firebase-config.js?v=20261110130630";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -41,7 +41,7 @@ function loadHistory() {
   return histReady;
 }
 const custHist = new Map();
-const ui = { view: "play", section: "cust", mode: "staff", cv: "", sel: new Set(), visible: [] };
+const ui = { view: "play", section: "all", mode: "staff", cv: "", sel: new Set(), visible: [] };
 let me = "", unsubs = [], ready = new Set();
 const custById = id => S.customers.find(c => c.id === id);
 // Wheelhouse's own cards live under one house consignor (WH-00): tracked like any card, never paid out or emailed.
@@ -298,13 +298,13 @@ function renderLedger() {
   const q = $("#f-q").value.trim().toLowerCase(), fp = $("#f-plat").value, fs = $("#f-st").value;
   const view = ui.view, past = view !== "play";
   // Picking a consignor (e.g. from a profile) switches to the section that consignor belongs to.
-  if (fc && fc !== "__none" && custById(fc)) ui.section = isHouse(custById(fc)) ? "house" : "cust";
+  if (fc && fc !== "__none" && custById(fc) && ui.section !== "all") ui.section = isHouse(custById(fc)) ? "house" : "cust";
   document.querySelectorAll("#sections [data-s]").forEach(x => x.setAttribute("aria-pressed", x.dataset.s === ui.section));
   const fav = $("#f-added").value, fa = fav === "today" ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString() : fav === "7d" ? new Date(Date.now() - 7 * 864e5).toISOString() : fav === "1h" ? new Date(Date.now() - 36e5).toISOString() : "";
   const loading = past && !S.hist;
   const rows = (loading ? [] : S.all).filter(l =>
     (view === "all" || view === "batch" ? l.status !== "removed" : view === "play" ? !PAST.includes(l.status) : l.status === view) &&
-    (ui.section === "house" ? isHouse(custById(l.cust)) : !isHouse(custById(l.cust))) &&
+    (ui.section === "all" || (ui.section === "house" ? isHouse(custById(l.cust)) : !isHouse(custById(l.cust)))) &&
     (!fa || (l.added || "") >= fa) &&
     (!fc || (fc === "__none" ? !custById(l.cust) : l.cust === fc)) &&
     (!fp || l.plat === fp) && (!fs || l.status === fs) &&
@@ -322,7 +322,7 @@ function renderLedger() {
   }
   $("#bb-del").hidden = view === "removed"; $("#bb-restore").hidden = view !== "removed"; $("#bb-purge").hidden = view !== "removed";
   // A search that finds nothing here but matches cards in the other section says so.
-  const other = q && !rows.length && !loading ? S.all.filter(l => l.status !== "removed" && (ui.section === "house" ? !isHouse(custById(l.cust)) : isHouse(custById(l.cust))) && [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q)).length : 0;
+  const other = q && !rows.length && !loading && ui.section !== "all" ? S.all.filter(l => l.status !== "removed" && (ui.section === "house" ? !isHouse(custById(l.cust)) : isHouse(custById(l.cust))) && [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q)).length : 0;
   $("#count").textContent = other ? `No matches here · ${other} in ${ui.section === "house" ? "Customer consignments" : "Wheelhouse inventory"}` : loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
   $("#th-price").textContent = view === "paid" ? "Sale / to consignor" : "Price / bid";
   $("#th-when").textContent = "Auction #";

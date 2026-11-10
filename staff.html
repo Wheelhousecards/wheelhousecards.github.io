@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='3' width='18' height='26' rx='3' fill='%23D79431'/%3E%3Crect x='10' y='6' width='12' height='5' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="assets/app.css?v=20261109185256">
+<link rel="stylesheet" href="assets/app.css?v=20261110130630">
 </head>
 <body>
 <header><div class="wrap">
@@ -175,7 +175,8 @@
     <div class="panel" id="ledger">
       <div class="row" style="justify-content:space-between"><h2 id="ledger-h">All consigned cards</h2><span class="muted num" id="count"></span></div>
       <div class="tabs section-tabs" id="sections" role="group" aria-label="Customer cards or Wheelhouse inventory">
-        <button type="button" data-s="cust" aria-pressed="true">Customer consignments</button>
+        <button type="button" data-s="all" aria-pressed="true">All cards</button>
+        <button type="button" data-s="cust" aria-pressed="false">Customer consignments</button>
         <button type="button" data-s="house" aria-pressed="false">Wheelhouse inventory</button>
       </div>
       <div class="tabs" id="views" role="group" aria-label="Which cards to list">
@@ -232,6 +233,6 @@
 </div></main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script type="module" src="assets/staff.js?v=20261109185256"></script>
+<script type="module" src="assets/staff.js?v=20261110130630"></script>
 </body>
 </html>
