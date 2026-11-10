@@ -221,14 +221,14 @@ input.auction::placeholder{text-transform:none;font-family:var(--body)}
 a.bookmarklet{display:inline-block;padding:3px 10px;border-radius:6px;background:#4472C3;color:#fff!important;font-weight:700;text-decoration:none;cursor:grab}
 .section-tabs{margin:2px 0 10px}.section-tabs button{font-size:14px;padding:7px 14px}
 /* Status colours, by where a card is in the process */
-:root{--curating:#c9a063;--pending:#9b86c4}
+:root{--curating:#b07418;--pending:#7a4fc0}
 .st.pending{background:var(--pending)}.st.curating{background:var(--curating)}
-select.stsel{font-weight:600;border-width:1px;padding-left:8px}
-select.stsel.s-curating{color:#8c6a2e;border-color:#efd9b4;background-color:#fdf8ef}
-select.stsel.s-live{color:#3f6b50;border-color:#cfe5d6;background-color:#f4faf6}
-select.stsel.s-pending{color:#6b5596;border-color:#ddd2ef;background-color:#f8f5fc}
-select.stsel.s-sold{color:#4a6894;border-color:#d3e0f3;background-color:#f4f8fd}
-select.stsel.s-paid,select.stsel.s-returned{color:#6b6b6b;border-color:#e3e3e3;background-color:#f8f8f8}
-select.stsel.s-unsold{color:#9a5252;border-color:#f0d3d3;background-color:#fdf6f6}
+select.stsel{font-weight:700;border-width:2px;padding-left:8px}
+select.stsel.s-curating{color:#8a5a0c;border-color:#e4b46a;background-color:#fff6e6}
+select.stsel.s-live{color:#24563a;border-color:#7fb893;background-color:#ecf7ef}
+select.stsel.s-pending{color:#5b3796;border-color:#b79ce3;background-color:#f3eefc}
+select.stsel.s-sold{color:#2f569b;border-color:#8fb0e6;background-color:#edf3fd}
+select.stsel.s-paid,select.stsel.s-returned{color:#555;border-color:#cfcfcf;background-color:#f4f4f4}
+select.stsel.s-unsold{color:#9b2c2c;border-color:#e2a3a3;background-color:#fdf0f0}
 select.stsel option{color:#222;background:#fff;font-weight:400}
 #ledger select[data-f="format"]{min-width:118px}
