@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261110132126";
+import { db, logout } from "./firebase.js?v=20261110132822";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261110132126";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110132126";
-import { emailSend, contact } from "./firebase-config.js?v=20261110132126";
+} from "./ui.js?v=20261110132822";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110132822";
+import { emailSend, contact } from "./firebase-config.js?v=20261110132822";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -527,7 +527,7 @@ function openDetail(id) {
     <form id="d-form" class="form" autocomplete="off" style="border-top:1px solid var(--line);padding-top:14px">
       <div class="f w6"><h3>Edit</h3></div>
       <div class="f w6"><label for="d-title">Card</label><input id="d-title" value="${v(l.title)}"></div>
-      ${isDropoff(l) ? "" : `<div class="f"><label for="d-plat">Auction house</label><select id="d-plat">${Object.entries(PLAT).map(([k, n]) => `<option value="${k}"${k === l.plat ? " selected" : ""}>${n}</option>`).join("")}</select></div>`}
+      ${isDropoff(l) ? "" : `<div class="f"><label for="d-plat">Auction house</label><select id="d-plat">${Object.entries(PLAT).filter(([k]) => k !== "shibe" || k === l.plat).map(([k, n]) => `<option value="${k}"${k === l.plat ? " selected" : ""}>${n}</option>`).join("")}</select></div>`}
       <div class="f"><label for="d-grade">Grade</label><input id="d-grade" value="${v(l.grade === "Ungraded" ? "" : l.grade)}" placeholder="Ungraded"></div>
       <div class="f"><label for="d-cert">Cert #</label><input id="d-cert" value="${v(l.cert)}" style="font-family:var(--mono)"></div>
       <div class="f"><label for="d-period">${l.plat === "pcs" ? "Payout month" : "Auction / period"}</label><input id="d-period" value="${v(l.period)}" placeholder="${l.plat === "pcs" ? "October 2026" : "WA180"}"></div>
