@@ -5,7 +5,8 @@ export const CONTACT_EMAIL = "consignment@wheelhousecards.com";
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const money = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
 export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards", store: "In store at Wheelhouse", goldin: "Goldin", shibe: "Shibe Sports", other: "Other" };
-export const STAT = { curating: "Being curated", live: "Live", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you", removed: "Removed" };
+// pending = sold, waiting on the buyer's payment (not owed to the consignor yet).
+export const STAT = { curating: "Being curated", live: "Live", pending: "Pending sale", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you", removed: "Removed" };
 export const pad6 = n => String(n).padStart(6, "0");
 export const plural = n => `${n} card${n === 1 ? "" : "s"}`;
 export const isSold = l => l.status === "sold" || l.status === "paid";
@@ -391,7 +392,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
       ];
       banner = `<div class="notice curating"><b>Some of your cards aren’t listed yet</b><span>That’s normal. ${waiting.length || loose.length ? "Fanatics Collect and PC Sportscards review every card before listing it, which can take a while. " : ""}They’ll show up here as soon as they go live.${loose.length ? " You can see them under Everything." : ""}</span><ul>${lines.map(t => `<li>${t}</li>`).join("")}</ul></div>`;
     }
-    const list = mine.filter(l => (tab === "all" || (tab === "live" ? l.status === "live" : isSold(l))) && (!fp || l.plat === fp))
+    const list = mine.filter(l => (tab === "all" || (tab === "live" ? l.status === "live" : isSold(l) || l.status === "pending")) && (!fp || l.plat === fp))
       .sort((a, b) => {
         if (tab === "live") { const ea = a.ends ? new Date(a.ends) : Infinity, eb = b.ends ? new Date(b.ends) : Infinity; return ea - eb; }
         return new Date(b.soldDate || b.added) - new Date(a.soldDate || a.added);
@@ -409,6 +410,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
       }
       else if (l.status === "live" && l.format !== "bin" && (!l.period || isAuctionNo(l.period))) { label = "Live in auction"; liveAuc = true; }
       else if (l.status === "live") { label = "Asking"; sub = l.plat === "store" ? "For sale in store at Wheelhouse" : "Buy It Now"; }
+      else if (l.status === "pending") { label = "Sale pending"; sub = "Waiting on the buyer’s payment"; }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
       else if (isSold(l)) { label = "Sold for"; recv = cardPayout(l, c) ?? "pending"; sub = staff && l.payout == null && cardSplit(l, c) != null ? `${cardSplit(l, c)}% split` + (l.status === "paid" ? " · paid" : "") : l.status === "paid" ? "Paid out" : ""; }
       else if (l.status === "returned") { label = "Returned to you"; sub = ""; }

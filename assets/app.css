@@ -18,7 +18,7 @@
 @font-face{font-family:"BuiltTitling";src:url("https://wheelhousecards.com/wp-content/uploads/2023/11/BuiltTitlingRg-Regular-400.ttf") format("truetype");font-weight:400 600;font-display:swap}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.45}
-.wrap{max-width:1560px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1680px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 header{background:var(--surface);border-bottom:4px solid var(--gold);box-shadow:0 1px 0 var(--line)}
 header .wrap{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between;padding-block:10px}
 .brand{display:flex;align-items:center;gap:14px;min-width:0}
@@ -220,3 +220,15 @@ input.auction::placeholder{text-transform:none;font-family:var(--body)}
 .grabbox ol{margin:6px 0 4px 18px;padding:0;display:grid;gap:4px}
 a.bookmarklet{display:inline-block;padding:3px 10px;border-radius:6px;background:#4472C3;color:#fff!important;font-weight:700;text-decoration:none;cursor:grab}
 .section-tabs{margin:2px 0 10px}.section-tabs button{font-size:14px;padding:7px 14px}
+/* Status colours, by where a card is in the process */
+:root{--curating:#b07418;--pending:#7a4fc0}
+.st.pending{background:var(--pending)}.st.curating{background:var(--curating)}
+select.stsel{font-weight:700;border-width:2px;padding-left:8px}
+select.stsel.s-curating{color:#8a5a0c;border-color:#e4b46a;background-color:#fff6e6}
+select.stsel.s-live{color:#24563a;border-color:#7fb893;background-color:#ecf7ef}
+select.stsel.s-pending{color:#5b3796;border-color:#b79ce3;background-color:#f3eefc}
+select.stsel.s-sold{color:#2f569b;border-color:#8fb0e6;background-color:#edf3fd}
+select.stsel.s-paid,select.stsel.s-returned{color:#555;border-color:#cfcfcf;background-color:#f4f4f4}
+select.stsel.s-unsold{color:#9b2c2c;border-color:#e2a3a3;background-color:#fdf0f0}
+select.stsel option{color:#222;background:#fff;font-weight:400}
+#ledger select[data-f="format"]{min-width:118px}
