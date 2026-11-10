@@ -7,7 +7,7 @@ import {
 import {
   getFirestore, connectFirestoreEmulator
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261110145823";
+import { firebaseConfig } from "./firebase-config.js?v=20261110145958";
 
 const local = ["localhost", "127.0.0.1"].includes(location.hostname);
 const config = local && firebaseConfig.projectId.startsWith("PASTE")

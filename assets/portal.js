@@ -1,9 +1,9 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261110145823";
+import { db, logout } from "./firebase.js?v=20261110145958";
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261110145823";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110145823";
-import { contact } from "./firebase-config.js?v=20261110145823";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261110145958";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110145958";
+import { contact } from "./firebase-config.js?v=20261110145958";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
@@ -30,7 +30,7 @@ async function start(user) {
   try {
     const cs = await getDocs(query(collection(db, "customers"), where("email", "==", me)));
     if (cs.empty) {
-      $("#none-msg").textContent = `We couldn’t find a consignment account for ${me}. You need to sign in with the email address we have on file for you, which is usually the one you gave us when you dropped off your cards. If you think you used a different email, sign in with that one instead.`;
+      $("#none-msg").textContent = `We couldn’t find a consignment account for ${me}. You need to sign in with the email address we have on file for you given at drop off.`;
       $("#none-contact").innerHTML = contact.email
         ? `Email us at <a href="mailto:${esc(contact.email)}">${esc(contact.email)}</a> with your name and the email you signed up with, and we’ll connect it to your cards.` + (contact.phone ? ` You can also call ${esc(contact.phone)}.` : "")
         : `Stop by any Wheelhouse location or reach us through <a href="${esc(contact.site)}" target="_blank" rel="noopener">wheelhousecards.com</a>.`;
