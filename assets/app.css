@@ -232,3 +232,8 @@ select.stsel.s-paid,select.stsel.s-returned{color:#555;border-color:#cfcfcf;back
 select.stsel.s-unsold{color:#9b2c2c;border-color:#e2a3a3;background-color:#fdf0f0}
 select.stsel option{color:#222;background:#fff;font-weight:400}
 #ledger select[data-f="format"]{min-width:118px}
+.platgroup{display:grid;gap:8px}
+.platgroup+.platgroup{margin-top:18px}
+.plathead{display:flex;align-items:baseline;gap:10px;margin:6px 0 2px;font:600 18px var(--display,inherit);padding-left:10px;border-left:4px solid var(--muted)}
+.plathead.fan{border-color:var(--fan)}.plathead.pcs{border-color:var(--pcs)}.plathead.store{border-color:#c98a1b}
+.plathead .n{font:500 13px var(--body);color:var(--muted)}

@@ -398,7 +398,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
         if (tab === "live") { const ea = a.ends ? new Date(a.ends) : Infinity, eb = b.ends ? new Date(b.ends) : Infinity; return ea - eb; }
         return new Date(b.soldDate || b.added) - new Date(a.soldDate || a.added);
       });
-    q("cards").innerHTML = banner + (list.length ? list.map(l => {
+    const cardHtml = l => {
       const tl = l.format === "auction" && l.status === "live" ? timeLeft(l.ends) : "";
       let label, sub, recv = null, sub2 = "", liveAuc = false;
       if (isDropoff(l)) {
@@ -427,7 +427,10 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
           ? `<span class="sub">${gets}</span><span class="amt recv">${recv === "pending" ? (staff ? '<span class="need" style="font-size:16px">Set PC %</span>' : '<span class="muted" style="font-size:16px">Pending</span>') : money(recv)}</span><span class="soldfor">${isDropoff(l) ? "Sold so far" : "Sold for"} ${money(l.price)}</span>`
           : `<span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>`}${liveAuc ? "" : `<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>`}${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}</div>
       </article>`;
-    }).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
+    };
+    const platOrder = ["fan", "pcs", "store", "goldin", "shibe", "other"];
+    const groups = platOrder.map(p => [p, list.filter(l => (PLAT[l.plat] ? l.plat : "other") === p)]).filter(([, g]) => g.length);
+    q("cards").innerHTML = banner + (list.length ? groups.map(([p, g]) => `<section class="platgroup"><h3 class="plathead ${p}">${PLAT[p]}<span class="n">${g.length} card${g.length === 1 ? "" : "s"}</span></h3>${g.map(cardHtml).join("")}</section>`).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
   }
   return { render };
 }
