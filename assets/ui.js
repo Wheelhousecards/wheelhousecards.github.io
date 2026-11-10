@@ -99,10 +99,13 @@ export function detect(url) {
 }
 
 // Authentic-only cards (no numeric grade) count as Ungraded: "CGC 0", "PSA/DNA 0", "Authenticated", "CGC AUTH", "PSA A".
-export const isRawGrade = g => { g = String(g || "").trim(); return !g || /^(raw|ungraded|none|n\/?a)$/i.test(g) || /^[a-z/]+\s*0$/i.test(g) || /auth/i.test(g) || /^[a-z/]+\s+a$/i.test(g); };
+// PSA and SGC authentic-only slabs ("PSA 0", "SGC 0", "PSA/DNA Authenticated", "SGC AUTH") are called "A" grades: "PSA A", "SGC A".
+const authGrade = g => { const m = String(g || "").trim().match(/^(psa|sgc)(?:\s*\/\s*dna)?\s*(?:0|a|auth(?:entic(?:ated)?)?)$/i); return m ? m[1].toUpperCase() + " A" : ""; };
+// Everything else without a numeric grade counts as Ungraded: "CGC 0", "CGC AUTH", "Authenticated", blank.
+export const isRawGrade = g => { g = String(g || "").trim(); if (authGrade(g)) return false; return !g || /^(raw|ungraded|none|n\/?a)$/i.test(g) || /^[a-z/]+\s*0$/i.test(g) || /auth/i.test(g); };
 export function normGrade(g) {
   g = String(g || "").trim();
-  return isRawGrade(g) ? "Ungraded" : g;
+  return authGrade(g) || (isRawGrade(g) ? "Ungraded" : g);
 }
 
 export function gradeHtml(l, stack) {

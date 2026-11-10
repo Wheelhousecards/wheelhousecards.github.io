@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261110130630";
+import { db, logout } from "./firebase.js?v=20261110131248";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261110130630";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110130630";
-import { emailSend, contact } from "./firebase-config.js?v=20261110130630";
+} from "./ui.js?v=20261110131248";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110131248";
+import { emailSend, contact } from "./firebase-config.js?v=20261110131248";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -350,7 +350,7 @@ function renderLedger() {
       <td>${gradeHtml(l, true)}</td>
       <td>${isDropoff(l) ? "Auction" : `<select data-f="format" aria-label="Format for SKU ${esc(l.sku)}"><option value="auction"${l.format !== "bin" ? " selected" : ""}>Auction</option><option value="bin"${l.format === "bin" ? " selected" : ""}>Buy It Now</option></select>`}</td>
       <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${shareText(cardPayout(l, custById(l.cust)), true)} to consignor${l.payout == null && !isDropoff(l) && cardSplit(l, custById(l.cust)) != null ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
-      <td class="num"><input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}</td>
+      <td class="num">${l.format === "bin" ? '<span class="muted" title="Buy It Now has no auction">—</span>' : `<input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}`}</td>
       <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
       <td><button class="x" type="button" data-del aria-label="Remove SKU ${esc(l.sku)}">${delOne === l.id ? "Sure?" : "×"}</button></td></tr>`;
