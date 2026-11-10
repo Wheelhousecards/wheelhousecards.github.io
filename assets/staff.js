@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261110144423";
+import { db, logout } from "./firebase.js?v=20261110145823";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261110144423";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110144423";
-import { emailSend, contact } from "./firebase-config.js?v=20261110144423";
+} from "./ui.js?v=20261110145823";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110145823";
+import { emailSend, contact } from "./firebase-config.js?v=20261110145823";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -848,6 +848,8 @@ async function savePool(rows) {
 const psSel = new Set();
 // Batches belong to one customer, so only that customer's PC batches are offered.
 const pcsBatches = cust => S.batches.filter(b => b.plat === "pcs" && (!cust || b.cust === cust)).sort((a, b) => b.id.localeCompare(a.id));
+// The customer's PC Sportscards cards that were entered by hand (not from the export yet), so an export row can be matched to them.
+const pcsCardsFor = cust => S.all.filter(l => !isDropoff(l) && l.cust === cust && l.plat === "pcs" && !l.pcsId && l.status !== "removed").sort((a, b) => (b.sku || "").localeCompare(a.sku || ""));
 const dropoffsFor = cust => S.all.filter(l => isDropoff(l) && l.cust === cust && l.status !== "removed").sort((a, b) => (b.dropDate || "").localeCompare(a.dropDate || ""));
 async function newDropoff({ cust, dropDate, batch, expected = 0, items = [], photos = [] }) {
   const sku = pad6(await reserve("sku", 1, maxSku()));
@@ -879,13 +881,15 @@ function renderSort() {
     const pc = $("#ps-cust").value;
     if (document.activeElement !== $("#ps-cust")) $("#ps-cust").innerHTML = '<option value="">Choose customer…</option>' + custOptions(pc);
     const cust = $("#ps-cust").value, ps = $("#ps-sku").value;
-    if (document.activeElement !== $("#ps-sku")) $("#ps-sku").innerHTML = '<option value="__new">New drop-off SKU</option>' + (cust ? dropoffsFor(cust).map(l => `<option value="${l.id}"${l.id === ps ? " selected" : ""}>Add to SKU ${esc(l.sku)} · ${l.dropDate ? fmtDay(l.dropDate) : ""} · ${(l.items || []).length}${l.expected ? ` of ${l.expected}` : ""} cards</option>`).join("") : "");
+    if (document.activeElement !== $("#ps-sku")) $("#ps-sku").innerHTML = '<option value="__new">New drop-off SKU</option>' + (cust ? dropoffsFor(cust).map(l => `<option value="${l.id}"${l.id === ps ? " selected" : ""}>Add to SKU ${esc(l.sku)} · ${l.dropDate ? fmtDay(l.dropDate) : ""} · ${(l.items || []).length}${l.expected ? ` of ${l.expected}` : ""} cards</option>`).join("") : "")
+      + (cust && pcsCardsFor(cust).length ? `<optgroup label="Their PC cards already on the site">${pcsCardsFor(cust).map(l => `<option value="${l.id}"${l.id === ps ? " selected" : ""}>Match to SKU ${esc(l.sku)} · ${esc(l.title.length > 60 ? l.title.slice(0, 58) + "…" : l.title)}</option>`).join("")}</optgroup>` : "");
     $("#ps-newwrap").hidden = $("#ps-sku").value !== "__new";
     if (!$("#ps-date").value) $("#ps-date").value = today();
     const pb = $("#ps-batch").value;
     if (document.activeElement !== $("#ps-batch")) $("#ps-batch").innerHTML = '<option value="">No batch</option>' + pcsBatches($("#ps-cust").value || "__none").map(b => `<option value="${b.id}"${b.id === pb ? " selected" : ""}>Batch ${esc(b.id)}${b.ship ? ` · shipped ${fmtDay(b.ship)}` : ""}</option>`).join("");
     $("#ps-batch").disabled = $("#ps-sku").value !== "__new";
-    $("#ps-go").textContent = $("#ps-sku").value === "__new" ? `Create SKU with ${psSel.size} card${psSel.size === 1 ? "" : "s"}` : `Add ${psSel.size} to that SKU`;
+    const tgt = S.all.find(x => x.id === $("#ps-sku").value);
+    $("#ps-go").textContent = $("#ps-sku").value === "__new" ? `Create SKU with ${psSel.size} card${psSel.size === 1 ? "" : "s"}` : tgt && !isDropoff(tgt) ? `Match to SKU ${tgt.sku}` : `Add ${psSel.size} to that SKU`;
     $("#ps-hide").textContent = hid ? "Put back in the list" : "Not consigned";
   }
   // drop-off form selects
@@ -918,21 +922,28 @@ $("#ps-go").addEventListener("click", async e => {
   const items = picked.map(({ hidden, ...r }) => r);
   e.target.disabled = true;
   const res = await guarded(msg, async () => {
-    let id, sku;
+    let id, sku, matched = false;
     if (target === "__new") {
       const dropDate = $("#ps-date").value || today();
       ({ id, sku } = await newDropoff({ cust, dropDate, batch: $("#ps-batch").value, items }));
     } else {
       const l = S.all.find(x => x.id === target); id = l.id; sku = l.sku;
-      await commit([upd(l.id, dropPatch([...(l.items || []), ...items]))]);
+      if (isDropoff(l)) await commit([upd(l.id, dropPatch([...(l.items || []), ...items]))]);
+      else {
+        matched = true;
+        // A card entered by hand: keep its SKU, title and photo, and turn it into a drop-off holding the export row(s)
+        // so later PC exports keep its status and sale price up to date automatically.
+        const photos = [...(l.photo ? [l.photo] : []), ...(l.photos || [])];
+        await commit([upd(l.id, { kind: "dropoff", dropDate: l.dropDate || (l.added || "").slice(0, 10) || today(), expected: 0, photos, photo: null, ...dropPatch(items) })]);
+      }
     }
     const ids = new Set(items.map(x => x.pcsId));
     await savePool((S.pool || []).filter(r => !ids.has(r.pcsId)));
-    return { id, sku };
+    return { id, sku, matched };
   });
   e.target.disabled = false;
   if (res) {
-    msg.innerHTML = `Added ${plural(items.length)} to SKU <button class="linkbtn code" type="button" data-open="${res.id}">${esc(res.sku)}</button> for ${esc(custById(cust).name)}. Open it to add the drop-off photos.`;
+    msg.innerHTML = res.matched ? `Matched ${plural(items.length)} to SKU <button class="linkbtn code" type="button" data-open="${res.id}">${esc(res.sku)}</button> for ${esc(custById(cust).name)}. Its status and sale price now update with each PC export.` : `Added ${plural(items.length)} to SKU <button class="linkbtn code" type="button" data-open="${res.id}">${esc(res.sku)}</button> for ${esc(custById(cust).name)}. Open it to add the drop-off photos.`;
     psSel.clear(); $("#ps-sku").value = "__new"; renderSort();
   }
 });
