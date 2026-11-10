@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261110160805";
+import { db, logout } from "./firebase.js?v=20261110183607";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261110160805";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110160805";
-import { emailSend, contact } from "./firebase-config.js?v=20261110160805";
+} from "./ui.js?v=20261110183607";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110183607";
+import { emailSend, contact } from "./firebase-config.js?v=20261110183607";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -799,6 +799,14 @@ detail.body.addEventListener("change", async e => {
 });
 detail.body.addEventListener("click", async e => {
   if (e.target.id === "dx-all") return;
+  if (e.target.dataset.rev != null) {
+    const l = S.all.find(x => x.id === openCard); if (!l) return;
+    const i = +e.target.dataset.rev, x = l.items[i]; if (!x?.reversal || x.reversal.applied) return;
+    const items = l.items.map((y, k) => k === i ? { ...y, reversal: { ...y.reversal, deduct: !y.reversal.deduct } } : y);
+    const ok = await guarded($("#dx-msg"), async () => { await commit([upd(l.id, dropPatch(items))]); return true; });
+    if (ok) { Object.assign(l, dropPatch(items)); openDropDetail(l); $("#dx-msg").textContent = items[i].reversal.deduct ? `${money(x.reversal.amount)} will come off ${custById(l.cust)?.name || "their"}’s next payout.` : "Wheelhouse absorbs this one; nothing comes off their payout."; }
+    return;
+  }
   if (e.target.id === "dx-back") {
     const l = S.all.find(x => x.id === openCard); if (!l) return;
     const idx = new Set([...detail.body.querySelectorAll("input.dx:checked")].map(x => +x.dataset.i));
@@ -983,6 +991,7 @@ function payoutEmail(c, o) {
     `You have a Wheelhouse consignment payout of ${money(o.amount)} coming your way.`, "",
     // Card-by-card list left out for now; add `...(o.cards.length ? [...lines, ""] : [])` here to bring it back.
     ...(c.payable ? [`Includes ${money(c.payable)} carried over from your previous balance.`, ""] : []),
+    ...((o.deductions || []).length ? [...o.deductions.map(x => `- ${x.title}: sale reversed by buyer, −${money(x.reversal.amount)}, relisted.`), ""] : []),
     payLine(c) ? `We’ll send it by ${payLine(c)}. If that’s changed, just reply and let us know.` : "How would you like to be paid: Venmo, PayPal or check? Reply with your handle, PayPal email or mailing address.",
     "", `You can see all your cards and sales anytime at ${SITE}`, "", "Thanks,", "Wheelhouse",
   ].join("\n");
@@ -1109,7 +1118,7 @@ function renderPayouts() {
     const canMail = !!c.email;
     return `<tr data-c="${c.id}">
       <td><span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button></td>
-      <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}</td>
+      <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}${o.deducted ? `<div class="cert">−${money(o.deducted)} reversed sale${o.deductions.length === 1 ? "" : "s"}</div>` : ""}</td>
       <td class="num">${o.count}${o.needPct ? `<div class="flag">${o.needPct} PC sale${o.needPct === 1 ? "" : "s"} need a %</div>` : ""}</td>
       <td style="max-width:240px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>'}</td>
       <td class="num">${c.notifiedAt ? fmtDay(c.notifiedAt.slice(0, 10)) + (c.notifiedAmount != null && Math.abs(c.notifiedAmount - o.amount) > 0.004 ? `<div class="cert">was ${money(c.notifiedAmount)}</div>` : "") : '<span class="muted">Not yet</span>'}</td>
@@ -1140,7 +1149,9 @@ $("#p-body").addEventListener("click", async e => {
       const ops = o.cards.map(l => upd(l.id, { status: "paid" }));
       const lots = new Map();
       o.dropItems.forEach(x => lots.set(x.lot.id, x.lot));
-      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => x.status === "sold" && itemPct(x, l, c) != null ? { ...x, status: "paid", paidOut: today() } : x)))));
+      (o.deductions || []).forEach(x => lots.set(x.lot.id, x.lot));
+      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => x.status === "sold" && itemPct(x, l, c) != null ? { ...x, status: "paid", paidOut: today() } : x.reversal?.deduct && !x.reversal.applied ? { ...x, reversal: { ...x.reversal, applied: today() } } : x)))));
+      if (o.deducted) entry.deducted = Math.round(o.deducted * 100) / 100;
       ops.push(["update", doc(db, "customers", c.id), { payable: 0, payouts: [...(c.payouts || []), entry], notifiedAt: "", notifiedAmount: null }]);
       await commit(ops);
       msg.textContent = `Logged a ${money(entry.amount)} payout to ${c.name}. Their sold cards are now Paid out.`;
@@ -1794,7 +1805,7 @@ const firstOfMonth = () => { const d = new Date(); return new Date(d.getFullYear
 // PC Sportscards export → the unsorted list (meta/pcsPool), plus status updates for cards already sorted into drop-off SKUs.
 const PRANK = { live: 1, unsold: 1, awaiting: 2, sold: 3, paid: 4 };
 // Status moves forward only, except a sale that falls through (cancelled/returned) before the consignor is paid.
-const moves = (from, to) => from !== "cancelled" && (to === "cancelled" ? from !== "paid" : (PRANK[to] || 0) > (PRANK[from] || 0) || (from === "live" && to === "unsold"));
+const moves = (from, to) => from !== "cancelled" && (to === "cancelled" ? true : (PRANK[to] || 0) > (PRANK[from] || 0) || (from === "live" && to === "unsold"));
 const normTitle = t => (t || "").toLowerCase().replace(/\s+/g, " ").trim();
 function planPcs() {
   const m = imp.map;
@@ -1829,12 +1840,14 @@ function planPcs() {
     if (d) {
       const x = d.lot.items[d.i], patch = {};
       if (moves(x.status, status)) patch.status = status;
+      // Paid out, then the sale fell through: record it. Wheelhouse absorbs it unless staff choose to deduct it.
+      if (patch.status === "cancelled" && x.status === "paid" && !x.reversal) patch.reversal = { date: today(), amount: Math.round((itemShare(x, custById(d.lot.cust), d.lot) || 0) * 100) / 100, deduct: false };
       if (price && price !== x.price && x.status !== "cancelled") patch.price = price;
       if (saleish && net && net !== x.net && x.status !== "paid" && x.status !== "cancelled") patch.net = net;
       if (saleish && soldDate && !x.soldDate) patch.soldDate = soldDate;
       if (pcsPaid && !x.pcsPaid) patch.pcsPaid = pcsPaid;
       if (!Object.keys(patch).length) return { act: "skip", why: "No change", label, same: true };
-      return { act: "item", lot: d.lot, i: d.i, patch, label, change: patch.status ? `${ITEM_STAT[x.status]} → ${ITEM_STAT[patch.status]}` : "sale details" };
+      return { act: "item", lot: d.lot, i: d.i, patch, label, change: patch.reversal ? `Sale reversed after payout (${money(patch.reversal.amount)}, absorbed by Wheelhouse)` : patch.status ? `${ITEM_STAT[x.status]} → ${ITEM_STAT[patch.status]}` : "sale details" };
     }
     const old = asCard.get(pcsId);
     if (old) return { act: "skip", why: old.status === "removed" ? `Removed earlier (SKU ${old.sku})` : `Already a card (SKU ${old.sku})`, label, same: true };
@@ -1878,7 +1891,7 @@ function renderPcsImport() {
   const plan = planPcs(), n = a => plan.filter(p => p.act === a).length;
   const recent = parseInt($("#i-recent").value, 10) || 0;
   const flagN = st => plan.filter(p => p.act === "item" && p.patch.status === st).length;
-  $("#i-sum").innerHTML = `Read the newest ${(recent ? Math.min(recent, imp.rows.length) : imp.rows.length).toLocaleString()} of ${imp.rows.length.toLocaleString()} rows · <span class="act-new">${n("pool")} new to sort</span> · <span class="act-upd">${n("item")} updates to sorted cards</span>${n("relist") ? ` · <span class="act-upd">${n("relist")} relisted cards matched to their drop-off</span>` : ""}${flagN("awaiting") ? ` · <span class="need">${flagN("awaiting")} sold, awaiting payment</span>` : ""}${flagN("cancelled") ? ` · <span class="need">${flagN("cancelled")} sales cancelled</span>` : ""}${n("poolupd") ? ` · ${n("poolupd")} updates to unsorted cards` : ""} · ${plan.filter(p => p.same).length} unchanged · <span class="act-skip">${plan.filter(p => p.early).length} paid before the cutoff</span>`;
+  $("#i-sum").innerHTML = `Read the newest ${(recent ? Math.min(recent, imp.rows.length) : imp.rows.length).toLocaleString()} of ${imp.rows.length.toLocaleString()} rows · <span class="act-new">${n("pool")} new to sort</span> · <span class="act-upd">${n("item")} updates to sorted cards</span>${n("relist") ? ` · <span class="act-upd">${n("relist")} relisted cards matched to their drop-off</span>` : ""}${flagN("awaiting") ? ` · <span class="need">${flagN("awaiting")} sold, awaiting payment</span>` : ""}${flagN("cancelled") ? ` · <span class="need">${flagN("cancelled")} sales cancelled</span>` : ""}${plan.filter(p => p.patch?.reversal).length ? ` · <span class="need">${plan.filter(p => p.patch?.reversal).length} reversed after payout</span>` : ""}${n("poolupd") ? ` · ${n("poolupd")} updates to unsorted cards` : ""} · ${plan.filter(p => p.same).length} unchanged · <span class="act-skip">${plan.filter(p => p.early).length} paid before the cutoff</span>`;
   const order = { item: 0, relist: 0, pool: 1, poolupd: 2, skip: 3 };
   $("#i-prev").innerHTML = [...plan].sort((a, b) => order[a.act] - order[b.act]).map(p => {
     const r = p.row;

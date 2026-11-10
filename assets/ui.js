@@ -59,6 +59,24 @@ export const ITEM_STAT = { live: "Listed", awaiting: "Awaiting payment", sold: "
 export const CUST_ITEM_STAT = { live: "Listed", awaiting: "Sold · payment pending", sold: "Sold", paid: "Paid out", unsold: "Unsold", cancelled: "Being relisted" };
 // What the customer sees: a cancelled sale that's been relisted shows only as the new listing.
 export const custItems = items => (items || []).filter(x => !(x.status === "cancelled" && x.relistedAs));
+// A card's earlier sales that fell through, oldest first, as one line: Sold $55 · Oct 28 → Buyer didn't pay — relisted Nov 3 → …
+const shortDay = d => d ? new Date(d.slice(0, 10) + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+export function itemHistory(x, items) {
+  const by = new Map((items || []).map(y => [y.pcsId, y]));
+  const chain = []; let cur = x;
+  if (x.status === "cancelled" && !x.relistedAs) chain.unshift({ o: x, next: null });
+  for (let k = 0; cur.relistOf && by.get(cur.relistOf) && k < 10; k++) { const o = by.get(cur.relistOf); chain.unshift({ o, next: cur }); cur = o; }
+  if (!chain.length) return "";
+  const steps = [];
+  chain.forEach(({ o, next }) => {
+    steps.push(`<b>Sold ${money(o.price)}${o.soldDate ? ` · ${shortDay(o.soldDate)}` : ""}</b>`);
+    const why = o.reversal ? "Buyer returned it" : "Buyer didn’t pay";
+    steps.push(next ? `${why} — relisted${next.listed ? ` ${shortDay(next.listed)}` : ""}` : `${why} — being relisted`);
+  });
+  if (x.status !== "cancelled" || x.relistedAs) steps.push(x.status === "live" ? "Live on eBay" : `<b>${CUST_ITEM_STAT[x.status] || ""}${x.status === "sold" || x.status === "paid" || x.status === "awaiting" ? ` ${money(x.price)}${x.soldDate ? ` · ${shortDay(x.soldDate)}` : ""}` : ""}</b>`);
+  return `<div class="hist">${steps.join(" <span aria-hidden=\"true\">→</span> ")}</div>`;
+}
+export const RELIST_NOTE = "Sometimes an eBay buyer doesn’t pay or returns a card. When that happens it’s relisted, and you’re paid once, when the final sale is completed.";
 // PC Sportscards' eBay seller name. Once set, "Find on eBay" only searches their listings.
 export const PCS_SELLER = "pc_sportscards";
 // Searches eBay for the card's exact PC Sportscards title (limited to their store once PCS_SELLER is set).
@@ -88,8 +106,11 @@ export function owedFor(c, listings) {
   // Sales with no PC % yet aren't counted until staff set one.
   const sold = soldAll.filter(l => cardPayout(l, c) != null), dropItems = itemsAll.filter(x => itemPct(x, x.lot, c) != null);
   const needPct = soldAll.length - sold.length + itemsAll.length - dropItems.length;
-  return { cards: sold, dropItems, count: sold.length + dropItems.length, needPct,
-    amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + dropItems.reduce((s, x) => s + itemShare(x, c, x.lot), 0) + (c?.payable || 0) };
+  // Sales reversed after the customer was paid: Wheelhouse absorbs them unless staff chose to deduct one.
+  const deductions = mine.filter(isDropoff).flatMap(l => (l.items || []).filter(x => x.reversal?.deduct && !x.reversal.applied).map(x => ({ ...x, lot: l })));
+  const deducted = deductions.reduce((s, x) => s + (x.reversal.amount || 0), 0);
+  return { cards: sold, dropItems, deductions, deducted, count: sold.length + dropItems.length, needPct,
+    amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + dropItems.reduce((s, x) => s + itemShare(x, c, x.lot), 0) + (c?.payable || 0) - deducted };
 }
 
 export function detect(url) {
@@ -200,7 +221,8 @@ export function cardDetailHtml(l, c, { staff = false } = {}) {
     const ST = staff ? ITEM_STAT : CUST_ITEM_STAT;
     const head = `Cards in this drop-off (${sm.cards}${l.expected && l.expected !== sm.cards ? ` of ${l.expected} dropped off` : ""})`;
     lot = `<div style="display:grid;gap:8px"><h3>${head}</h3>` + (items.length
-      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${x.pcsId ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status === "awaiting" ? "sold" : x.status === "cancelled" ? "unsold" : x.status}">${ST[x.status] || esc(x.status)}</span>${staff && x.status === "awaiting" ? '<div class="flag">Waiting on buyer payment</div>' : ""}${staff && x.status === "cancelled" ? `<div class="flag">${x.relistedAs ? `Relisted as PC #${esc(x.relistedAs)}` : "Watch for the relist"}</div>` : ""}${staff && x.relistOf ? `<div class="cert">Relist of PC #${esc(x.relistOf)}</div>` : ""}</td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price && (staff || x.status !== "cancelled") ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? shareText(itemShare(x, c, l), staff) : x.status === "awaiting" ? '<span class="muted">Pending</span>' : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold${sm.awaiting ? ` · ${sm.awaiting} pending` : ""}</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
+      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${itemHistory(x, l.items)}${x.pcsId && staff ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}${staff && x.reversal ? `<div class="flag rev">Sale reversed after payout · ${money(x.reversal.amount)} ${x.reversal.applied ? `deducted ${fmtDay(x.reversal.applied)}` : x.reversal.deduct ? "will come off their next payout" : "absorbed by Wheelhouse"}</div>${x.reversal.applied ? "" : `<button class="btn ghost sm" type="button" data-rev="${i}">${x.reversal.deduct ? "Don’t deduct (Wheelhouse absorbs)" : "Deduct from next payout"}</button>`}` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status === "awaiting" ? "sold" : x.status === "cancelled" ? "unsold" : x.status}">${ST[x.status] || esc(x.status)}</span>${staff && x.status === "awaiting" ? '<div class="flag">Waiting on buyer payment</div>' : ""}${staff && x.status === "cancelled" ? `<div class="flag">${x.relistedAs ? `Relisted as PC #${esc(x.relistedAs)}` : "Watch for the relist"}</div>` : ""}${staff && x.relistOf ? `<div class="cert">Relist of PC #${esc(x.relistOf)}</div>` : ""}</td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price && (staff || x.status !== "cancelled") ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? shareText(itemShare(x, c, l), staff) : x.status === "awaiting" ? '<span class="muted">Pending</span>' : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold${sm.awaiting ? ` · ${sm.awaiting} pending` : ""}</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
+      + (items.some(x => itemHistory(x, l.items)) ? `<div class="muted" style="font-size:13px">${RELIST_NOTE}</div>` : "")
       : `<div class="empty" style="padding:16px">${staff ? "No cards in this drop-off yet. Select them in the PC Sportscards sorting list and add them here." : "We’re itemizing the cards from this drop-off. They’ll show up here once PC Sportscards lists them."}</div>`) + `</div>`;
   } else if (isLot(l)) {
     const items = l.items || [];
