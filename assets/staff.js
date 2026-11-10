@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261110145958";
+import { db, logout } from "./firebase.js?v=20261110152811";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261110145958";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110145958";
-import { emailSend, contact } from "./firebase-config.js?v=20261110145958";
+} from "./ui.js?v=20261110152811";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110152811";
+import { emailSend, contact } from "./firebase-config.js?v=20261110152811";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1394,12 +1394,18 @@ $("#bForm").addEventListener("submit", async e => {
     const plat = $("#b-plat").value, cards = parseInt($("#b-cards").value, 10) || 0;
     const bphotos = pending.map(p => ({ id: p.id, thumb: p.thumb, fromBatch: true }));
     let drop = S.all.find(l => isDropoff(l) && l.batch === id && l.status !== "removed");
+    // A drop-off already made from the sorting list for this customer and day (with no batch yet) becomes this batch's SKU.
+    let linked = false;
+    if (plat === "pcs" && !drop) {
+      drop = S.all.find(l => isDropoff(l) && l.cust === cust && !l.batch && l.dropDate === recv && l.status !== "removed");
+      if (drop) { linked = true; await updateDoc(listingRef(drop.id), { batch: id, ...(cards ? {} : { expected: drop.expected || 0 }), updatedAt: serverTimestamp() }); }
+    }
     if (plat === "pcs") {
       if (!drop) drop = await newDropoff({ cust, dropDate: recv, batch: id, expected: cards, photos: bphotos });
-      else await updateDoc(listingRef(drop.id), { cust, custEmail: email, dropDate: recv, expected: cards, title: `PC Sportscards drop-off · ${fmtDay(recv)}`,
+      else await updateDoc(listingRef(drop.id), { cust, custEmail: email, dropDate: recv, expected: cards || drop.expected || 0, batch: id, title: `PC Sportscards drop-off · ${fmtDay(recv)}`,
         photos: [...bphotos, ...(drop.photos || []).filter(p => !p.fromBatch && !bphotos.some(q => q.id === p.id))], updatedAt: serverTimestamp() });
     }
-    say(`${old ? "Saved" : "Logged"} batch ${id}.` + (plat === "pcs" && !old ? ` Drop-off SKU ${drop.sku} is ready for its cards.` : ""));
+    say(`${old ? "Saved" : "Logged"} batch ${id}.` + (plat === "pcs" && !old ? (linked ? ` Linked it to drop-off SKU ${drop.sku}.` : ` Drop-off SKU ${drop.sku} is ready for its cards.`) : ""));
     const receipt = !old ? { b: { id, cust, plat, cards, recv, photos: pending.map(p => ({ id: p.id, thumb: p.thumb })) } } : null;
     resetBatchForm();
     if (receipt && custById(cust)?.email) openReceipt(receipt.b);
