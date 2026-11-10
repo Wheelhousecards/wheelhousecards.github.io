@@ -123,7 +123,8 @@ export const isAuctionNo = p => /^(wa)?\s*\d+$/i.test(String(p || "").trim());
 // Auction end dates are plain days (YYYY-MM-DD) set per Fanatics Auction #.
 export const fmtEnd = d => { const x = new Date(String(d).slice(0, 10) + "T12:00:00"); return isNaN(x) ? "" : x.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); };
 export const auctionOver = d => !!d && String(d).slice(0, 10) < new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
-export const bidLink = l => l.plat === "fan" ? l.url || "" : l.plat === "pcs" ? ebayFind(l) : l.url || "";
+// PC Sportscards cards only get a bid link when a real listing link was entered (a title search isn't specific enough).
+export const bidLink = l => l.url || "";
 export function timeLeft(iso) {
   if (!iso) return "";
   const ms = new Date(iso) - Date.now();
