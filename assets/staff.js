@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261110183607";
+import { db, logout } from "./firebase.js?v=20261110190420";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261110183607";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110183607";
-import { emailSend, contact } from "./firebase-config.js?v=20261110183607";
+} from "./ui.js?v=20261110190420";
+import { setupGate, gateMarkup } from "./gate.js?v=20261110190420";
+import { emailSend, contact } from "./firebase-config.js?v=20261110190420";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -350,7 +350,7 @@ function renderLedger() {
       <td>${gradeHtml(l, true)}</td>
       <td>${isDropoff(l) ? "Auction" : `<select data-f="format" aria-label="Format for SKU ${esc(l.sku)}"><option value="auction"${l.format !== "bin" ? " selected" : ""}>Auction</option><option value="bin"${l.format === "bin" ? " selected" : ""}>Buy It Now</option></select>`}</td>
       <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${shareText(cardPayout(l, custById(l.cust)), true)} to consignor${l.payout == null && !isDropoff(l) && cardSplit(l, custById(l.cust)) != null ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
-      <td class="num">${l.format === "bin" ? '<span class="muted" title="Buy It Now has no auction">—</span>' : `<input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}`}</td>
+      <td class="num">${l.plat === "pcs" || l.plat === "store" ? '<span class="muted" title="No auction numbers here">—</span>' : l.format === "bin" ? '<span class="muted" title="Buy It Now has no auction">—</span>' : `<input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">`}${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}</td>
       <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" class="stsel s-${l.status}" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
       <td><button class="x" type="button" data-del aria-label="Remove SKU ${esc(l.sku)}">${delOne === l.id ? "Sure?" : "×"}</button></td></tr>`;
@@ -384,11 +384,14 @@ $("#a-url").addEventListener("input", e => {
   $("#detect").innerHTML = !e.target.value ? "No link yet? Leave it blank and the card shows as Being curated until you add one." : d ? `Detected <span class="chip ${d.plat}">${PLAT[d.plat]}</span>${d.item ? ` · item <span class="code">#${esc(d.item)}</span>` : ""}` : "Not a Fanatics Collect or eBay link.";
   if (d) $("#a-plat").value = d.plat;
   if (d && d.plat === "pcs") $("#a-format").value = "auction";
+  if (d) syncAucField();
 });
 $("#a-sku").addEventListener("input", e => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); if (e.target.value) e.target.dataset.manual = "1"; else delete e.target.dataset.manual; });
 $("#a-sku").addEventListener("blur", e => { if (e.target.value) e.target.value = pad6(e.target.value); else { delete e.target.dataset.manual; e.target.value = nextSku(); } });
 $("#a-grade").addEventListener("input", e => { const raw = normGrade(e.target.value) === "Ungraded"; $("#a-cert").placeholder = raw ? "Optional if ungraded" : "Cert number"; });
-$("#a-plat").addEventListener("change", e => { if (e.target.value === "pcs") $("#a-format").value = "auction"; if (e.target.value === "store") $("#a-format").value = "bin"; });
+const syncAucField = () => { const p = $("#a-plat").value, off = p === "pcs" || p === "store"; $("#a-auction").closest(".f").hidden = off; if (off) $("#a-auction").value = ""; };
+$("#a-plat").addEventListener("change", e => { if (e.target.value === "pcs") $("#a-format").value = "auction"; if (e.target.value === "store") $("#a-format").value = "bin"; syncAucField(); });
+syncAucField();
 $("#a-batch").addEventListener("change", e => { const b = batchById(e.target.value); if (b && !$("#a-cust").value) $("#a-cust").value = b.cust; });
 $("#addForm").addEventListener("submit", async e => {
   e.preventDefault();
@@ -1241,9 +1244,10 @@ $("#bb-st-go").addEventListener("click", e => bulk(e.target, async () => {
   lmsg(`Set ${plural(ls.length)} to ${STAT[s]}.`);
 }));
 $("#bb-auc-go").addEventListener("click", e => bulk(e.target, async () => {
-  const v = $("#bb-auc").value.trim().toUpperCase(), ls = selected();
+  const v = $("#bb-auc").value.trim().toUpperCase(), all = selected(), ls = all.filter(l => l.plat !== "pcs" && l.plat !== "store"), skip = all.length - ls.length;
+  if (!ls.length) { lmsg("PC Sportscards and in-store cards don’t have auction numbers."); return; }
   await commit(ls.map(l => upd(l.id, { period: v, ends: endsFor(v, l) })));
-  lmsg(v ? `Set auction ${v} on ${plural(ls.length)}.` : `Cleared the auction # on ${plural(ls.length)}.`);
+  lmsg((v ? `Set auction ${v} on ${plural(ls.length)}.` : `Cleared the auction # on ${plural(ls.length)}.`) + (skip ? ` Skipped ${plural(skip)} from PC Sportscards / in store (no auction numbers).` : ""));
 }));
 $("#bb-fmt-go").addEventListener("click", e => bulk(e.target, async () => {
   const f = $("#bb-fmt").value, ls = selected();
