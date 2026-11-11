@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261110190420";
+import { db, logout } from "./firebase.js?v=20261111121521";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261110190420";
-import { setupGate, gateMarkup } from "./gate.js?v=20261110190420";
-import { emailSend, contact } from "./firebase-config.js?v=20261110190420";
+} from "./ui.js?v=20261111121521";
+import { setupGate, gateMarkup } from "./gate.js?v=20261111121521";
+import { emailSend, contact } from "./firebase-config.js?v=20261111121521";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1658,7 +1658,8 @@ function planImport() {
     const sv = g("status").toLowerCase();
     const status = !sv ? "" : /curat/.test(sv) ? "curating" : /unsold|not sold|no sale|return/.test(sv) ? "unsold" : /paid/.test(sv) ? "paid" : /sold/.test(sv) ? "sold" : "live";
     const fv = g("format").toLowerCase();
-    const format = /bin|buy|fixed/.test(fv) ? "bin" : /auc/.test(fv) ? "auction" : plat === "pcs" ? "auction" : "bin";
+    // Blank format: Fanatics and PC Sportscards cards are auctions, in-store cards are Buy It Now.
+    const format = /bin|buy|fixed/.test(fv) ? "bin" : /auc/.test(fv) ? "auction" : plat === "store" ? "bin" : plat === "fan" || plat === "pcs" || isAuctionNo(period) ? "auction" : "bin";
     const bt = pick || (g("batch") && batchById(g("batch").toUpperCase())) || null;
     let cust = "", warn = "";
     if (type === "full") {
