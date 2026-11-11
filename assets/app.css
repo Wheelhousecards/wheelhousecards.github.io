@@ -240,3 +240,10 @@ select.stsel option{color:#222;background:#fff;font-weight:400}
 .hist{font-size:12px;color:var(--muted);line-height:1.5;margin-top:3px}
 .hist b{color:var(--ink,#111);font-weight:600}
 .flag.rev{display:block;margin-top:4px}
+select.stsel.s-awaitprice{color:#8a4b00;border-color:#f0b35c;background-color:#fff4e3}
+.st.awaitprice{background:#c97a12}
+.cert.ask-in{color:#8a4b00;font-weight:600}
+article.card.clickable{cursor:pointer;transition:border-color .12s,box-shadow .12s}
+article.card.clickable:hover{border-color:var(--ink,#111);box-shadow:0 2px 10px rgba(0,0,0,.06)}
+article.card.clickable:focus-visible{outline:2px solid var(--accent,#2d5bd7);outline-offset:2px}
+.notice.ask{border-left:4px solid #c97a12;background:#fff8ec}

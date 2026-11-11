@@ -1,9 +1,9 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261111121521";
-import { collection, query, where, getDocs, getDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261111121521";
-import { setupGate, gateMarkup } from "./gate.js?v=20261111121521";
-import { contact } from "./firebase-config.js?v=20261111121521";
+import { db, logout } from "./firebase.js?v=20261111135426";
+import { collection, query, where, getDocs, getDoc, doc, onSnapshot, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261111135426";
+import { setupGate, gateMarkup } from "./gate.js?v=20261111135426";
+import { contact } from "./firebase-config.js?v=20261111135426";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
@@ -12,7 +12,11 @@ $("#gate").innerHTML = gateMarkup("See your consigned cards",
   "Sign in with the email you gave Wheelhouse when you dropped off your cards. First time here? Choose “Create account” and use that same email.");
 
 let unsubs = [], state = { customer: null, listings: [], batches: [] }, me = "";
-const dash = mountDashboard($("#dash"), "", { loadPhoto: async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; } });
+const dash = mountDashboard($("#dash"), "", {
+  loadPhoto: async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; },
+  // Customers can only set their asking price on a card that is Awaiting price (see firestore.rules).
+  askPrice: (id, price, note) => updateDoc(doc(db, "listings", id), { askPrice: price, askNote: note, askAt: serverTimestamp() }),
+});
 createLightbox(
   id => {
     if (id.startsWith("L:")) { const l = state.listings.find(x => x.id === id.slice(2)); return l && { id: l.id, label: l.title, photos: l.photos || [] }; }

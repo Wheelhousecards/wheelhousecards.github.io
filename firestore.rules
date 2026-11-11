@@ -3,7 +3,7 @@ rules_version = '2';
 // Wheelhouse Consignment security rules
 // - Staff: anyone whose email has a document in /staff/{email}. Staff can read and write everything.
 // - Customers: signed in by email link. They can read only documents stamped with their own email
-//   (custEmail on listings, batches and photos; email on their customer record). They can't write anything.
+//   (custEmail on listings, batches and photos; email on their customer record). They can't write anything, except their asking price on a card that is Awaiting price.
 // - Staff-only data (batch notes, counters, staff list) is unreadable to customers.
 
 service cloud.firestore {
@@ -36,7 +36,15 @@ service cloud.firestore {
 
     match /listings/{id} {
       allow read: if isStaff() || ownsDoc();
-      allow write: if isStaff();
+      allow create, delete: if isStaff();
+      // Customers may only send their asking price on their own card while it is Awaiting price.
+      allow update: if isStaff() || (ownsDoc()
+        && resource.data.status == "awaitprice"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["askPrice", "askNote", "askAt"])
+        && request.resource.data.askPrice is number
+        && request.resource.data.askPrice > 0 && request.resource.data.askPrice < 10000000
+        && request.resource.data.askNote is string && request.resource.data.askNote.size() <= 400
+        && request.resource.data.askAt == request.time);
     }
 
     match /batches/{id} {

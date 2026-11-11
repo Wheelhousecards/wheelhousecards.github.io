@@ -6,7 +6,7 @@ export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;"
 export const money = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
 export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards", store: "In store at Wheelhouse", goldin: "Goldin", shibe: "Shibe Sports", other: "Other" };
 // pending = sold, waiting on the buyer's payment (not owed to the consignor yet).
-export const STAT = { curating: "Being curated", live: "Live", pending: "Pending sale", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you", removed: "Removed" };
+export const STAT = { curating: "Being curated", awaitprice: "Awaiting price", live: "Live", pending: "Pending sale", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you", removed: "Removed" };
 export const pad6 = n => String(n).padStart(6, "0");
 export const plural = n => `${n} card${n === 1 ? "" : "s"}`;
 export const isSold = l => l.status === "sold" || l.status === "paid";
@@ -323,9 +323,9 @@ export function dashboardMarkup(pickerHtml = "") {
   <div class="stats" data-d="stats"></div>
   <div class="row" style="justify-content:space-between">
     <div class="tabs" data-d="tabs">
-      <button type="button" data-t="live" aria-pressed="true">Live now</button>
+      <button type="button" data-t="all" aria-pressed="true">Everything</button>
+      <button type="button" data-t="live" aria-pressed="false">Live now</button>
       <button type="button" data-t="sold" aria-pressed="false">Sold</button>
-      <button type="button" data-t="all" aria-pressed="false">Everything</button>
       <button type="button" data-t="batches" aria-pressed="false">Batches</button>
     </div>
     <select data-d="plat" style="width:auto" aria-label="Platform"><option value="">All auction houses</option>${Object.entries(PLAT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
@@ -340,18 +340,45 @@ export function loadFullPhoto(container, loadPhoto) {
   if (!img || !loadPhoto) return;
   loadPhoto(img.dataset.photo).then(src => { if (src && img.isConnected) img.src = src; }).catch(() => {});
 }
-export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = {}) {
+export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, askPrice = null } = {}) {
   const gets = staff ? "Customer receives" : "You receive";
   root.innerHTML = dashboardMarkup(pickerHtml);
   const q = k => root.querySelector(`[data-d="${k}"]`);
-  let tab = "live", data = null;
+  let tab = "all", data = null;
   q("tabs").addEventListener("click", e => {
     const t = e.target.dataset.t; if (!t) return;
     tab = t; [...q("tabs").children].forEach(b => b.setAttribute("aria-pressed", b.dataset.t === t)); render();
   });
   q("plat").addEventListener("change", () => render());
   const modal = createModal();
+  const openAsk = id => {
+    const l = data?.listings.find(x => x.id === id); if (!l) return;
+    modal.open(`<h2 style="margin:0 0 4px">Set your asking price</h2><p class="muted" style="margin:0 0 12px">${esc(l.title)} · SKU ${esc(l.sku)}</p>
+      <p style="margin:0 0 12px">This card will go up as a Buy It Now on ${PLAT[l.plat]}. Tell us what you’d like to ask for it and we’ll list it.</p>
+      <form data-askform="${esc(l.id)}" style="display:grid;gap:10px">
+        <div class="f"><label for="ask-price">Asking price ($)</label><input id="ask-price" type="number" step="0.01" min="1" required inputmode="decimal" value="${l.askPrice ?? ""}" placeholder="e.g. 250"></div>
+        <div class="f"><label for="ask-note">Anything else? (optional)</label><textarea id="ask-note" rows="3" maxlength="400" placeholder="e.g. open to offers above $200">${esc(l.askNote || "")}</textarea></div>
+        <button class="btn" type="submit">Send my price</button><div class="muted" data-askmsg role="status"></div>
+      </form>`);
+    modal.body.querySelector("#ask-price").focus();
+  };
+  modal.body.addEventListener("submit", async e => {
+    const f = e.target.closest("[data-askform]"); if (!f) return; e.preventDefault();
+    const price = Math.round(parseFloat(f.querySelector("#ask-price").value) * 100) / 100, note = f.querySelector("#ask-note").value.trim().slice(0, 400), msg = f.querySelector("[data-askmsg]");
+    if (!(price > 0)) { msg.textContent = "Enter a price above $0."; return; }
+    f.querySelector("button").disabled = true; msg.textContent = "Sending…";
+    try {
+      await askPrice(f.dataset.askform, price, note);
+      const l = data.listings.find(x => x.id === f.dataset.askform); if (l) Object.assign(l, { askPrice: price, askNote: note, askAt: new Date().toISOString() });
+      render(); modal.close();
+    } catch (err) { f.querySelector("button").disabled = false; msg.innerHTML = `We couldn’t send that just now. Email your price to <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> and we’ll take care of it.`; }
+  });
+  root.addEventListener("keydown", e => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches?.("article.card[data-card]")) { e.preventDefault(); e.target.click(); }
+  });
   root.addEventListener("click", e => {
+    const ask = e.target.closest("[data-ask]"); if (ask) { if (askPrice) openAsk(ask.dataset.ask); return; }
+    if (e.target.closest("a")) return;
     const t = e.target.closest("[data-card]"); if (!t || !data) return;
     const l = data.listings.find(x => x.id === t.dataset.card);
     if (l) { modal.open(cardDetailHtml(l, data.customer)); loadFullPhoto(modal.body, loadPhoto); }
@@ -407,6 +434,8 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
     const loose = mine.filter(l => l.status === "curating" && (!fp || l.plat === fp) && !waiting.some(x => x.b.id === l.batch) && !prep.some(b => b.id === l.batch));
     const looseBy = Object.keys(PLAT).map(k => [k, loose.filter(l => l.plat === k).length]).filter(([, n]) => n);
     let banner = "";
+    const needPrice = mine.filter(l => l.status === "awaitprice" && l.askPrice == null);
+    const priceBanner = needPrice.length && tab !== "sold" ? `<div class="notice ask"><b>${needPrice.length === 1 ? "1 card needs" : `${needPrice.length} cards need`} your asking price</b><span>${staff ? "The customer sets these from their portal." : "These will go up as Buy It Now listings. Tap <b>Set your price</b> on each one and we’ll list it."}</span></div>` : "";
     if (tab !== "sold" && (waiting.length || prep.length || loose.length)) {
       const lines = [
         ...looseBy.map(([k, n]) => `${n} card${n === 1 ? " is" : "s are"} being curated by ${PLAT[k]}.`),
@@ -415,6 +444,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
       ];
       banner = `<div class="notice curating"><b>Some of your cards aren’t listed yet</b><span>That’s normal. ${waiting.length || loose.length ? "Fanatics Collect and PC Sportscards review every card before listing it, which can take a while. " : ""}They’ll show up here as soon as they go live.${loose.length ? " You can see them under Everything." : ""}</span><ul>${lines.map(t => `<li>${t}</li>`).join("")}</ul></div>`;
     }
+    banner = priceBanner + banner;
     const list = mine.filter(l => (tab === "all" || (tab === "live" ? l.status === "live" : isSold(l) || l.status === "pending")) && (!fp || l.plat === fp))
       .sort((a, b) => {
         if (tab === "live") { const ea = a.ends ? new Date(a.ends) : Infinity, eb = b.ends ? new Date(b.ends) : Infinity; return ea - eb; }
@@ -433,12 +463,13 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
       }
       else if (l.status === "live" && l.format !== "bin" && (!l.period || isAuctionNo(l.period))) { label = "Live in auction"; liveAuc = true; }
       else if (l.status === "live") { label = "Asking"; sub = l.plat === "store" ? "For sale in store at Wheelhouse" : "Buy It Now"; }
+      else if (l.status === "awaitprice") { label = l.askPrice != null ? (staff ? "Customer asked" : "Your asking price") : staff ? "Awaiting price" : "Waiting on your price"; l = { ...l, price: l.askPrice ?? null }; sub = l.askPrice != null ? (staff ? "List it and set it Live" : "We’ll list it soon") : staff ? "Waiting on the customer" : ""; }
       else if (l.status === "pending") { label = "Sale pending"; sub = "Waiting on the buyer’s payment"; }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
       else if (isSold(l)) { label = "Sold for"; recv = cardPayout(l, c) ?? "pending"; sub = staff && l.payout == null && cardSplit(l, c) != null ? `${cardSplit(l, c)}% split` + (l.status === "paid" ? " · paid" : "") : l.status === "paid" ? "Paid out" : ""; }
       else if (l.status === "returned") { label = "Returned to you"; sub = ""; }
       else { label = "Did not sell"; sub = "Ask us about relisting"; }
-      return `<article class="card">
+      return `<article class="card clickable" data-card="${esc(l.id)}" tabindex="0" aria-label="Details for ${esc(l.title)}">
         <div style="display:flex;gap:12px;align-items:flex-start;min-width:0">${l.photo ? `<button class="thumb" type="button" data-card="${esc(l.id)}" aria-label="Photo of ${esc(l.title)}"><img src="${l.photo.thumb}" alt=""></button>` : ""}<div style="display:grid;gap:6px;min-width:0">
           <div class="t">${esc(l.title)}</div>
           <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
@@ -447,7 +478,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false } = 
           ? `<span class="sub">${label}</span><span class="amt" style="font-size:20px">${l.ends ? (auctionOver(l.ends) ? "Ended" : `Ends ${fmtEnd(l.ends)}`) : "Live now"}</span>${l.ends && auctionOver(l.ends) ? '<span class="sub">Results coming soon</span>' : ""}${bidLink(l) ? `<a class="bidlink" href="${esc(bidLink(l))}" target="_blank" rel="noopener">See current bid ↗</a>` : ""}`
           : recv != null
           ? `<span class="sub">${gets}</span><span class="amt recv">${recv === "pending" ? (staff ? '<span class="need" style="font-size:16px">Set PC %</span>' : '<span class="muted" style="font-size:16px">Pending</span>') : money(recv)}</span><span class="soldfor">${isDropoff(l) ? "Sold so far" : "Sold for"} ${money(l.price)}</span>`
-          : `<span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>`}${liveAuc ? "" : `<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>`}${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}</div>
+          : `<span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>`}${liveAuc ? "" : `<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>`}${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}${l.status === "awaitprice" && !staff ? `<button class="btn sm" type="button" data-ask="${esc(l.id)}">${l.askPrice != null ? "Change my price" : "Set your price"}</button>` : ""}</div>
       </article>`;
     };
     const platOrder = ["fan", "pcs", "store", "goldin", "shibe", "other"];

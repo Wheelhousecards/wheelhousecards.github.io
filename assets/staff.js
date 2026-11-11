@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261111121521";
+import { db, logout } from "./firebase.js?v=20261111135426";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,15 +9,15 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261111121521";
-import { setupGate, gateMarkup } from "./gate.js?v=20261111121521";
-import { emailSend, contact } from "./firebase-config.js?v=20261111121521";
+} from "./ui.js?v=20261111135426";
+import { setupGate, gateMarkup } from "./gate.js?v=20261111135426";
+import { emailSend, contact } from "./firebase-config.js?v=20261111135426";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
 // cards (thousands from the old system) load only when needed, so the app stays inside Firestore's free daily reads.
 // "removed" is a recycle bin: removed cards can be restored until they're deleted for good.
-const ACTIVE = ["curating", "live", "pending", "sold", "unsold"], PAST = ["paid", "returned", "removed"];
+const ACTIVE = ["curating", "awaitprice", "live", "pending", "sold", "unsold"], PAST = ["paid", "returned", "removed"];
 const S = { pool: [], imports: [], customers: [], active: [], hist: null, batches: [], staff: [], notes: {}, counters: {}, _all: null };
 // S.all includes removed cards (for the Removed tab, restores and SKU checks); S.listings leaves them out.
 Object.defineProperty(S, "all", { get() {
@@ -349,7 +349,7 @@ function renderLedger() {
       <td class="title">${l.photo ? `<img src="${l.photo.thumb}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px">` : ""}${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
       <td>${isDropoff(l) ? "Auction" : `<select data-f="format" aria-label="Format for SKU ${esc(l.sku)}"><option value="auction"${l.format !== "bin" ? " selected" : ""}>Auction</option><option value="bin"${l.format === "bin" ? " selected" : ""}>Buy It Now</option></select>`}</td>
-      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "paid" || l.status === "sold" ? `<div class="cert">${shareText(cardPayout(l, custById(l.cust)), true)} to consignor${l.payout == null && !isDropoff(l) && cardSplit(l, custById(l.cust)) != null ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
+      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "awaitprice" ? `<div class="cert ${l.askPrice != null ? "ask-in" : ""}">${l.askPrice != null ? `Customer asked ${money(l.askPrice)}${l.askNote ? ` · “${esc(l.askNote)}”` : ""}` : "Waiting on customer’s price"}</div>` : ""}${l.status === "paid" || l.status === "sold" ? `<div class="cert">${shareText(cardPayout(l, custById(l.cust)), true)} to consignor${l.payout == null && !isDropoff(l) && cardSplit(l, custById(l.cust)) != null ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
       <td class="num">${l.plat === "pcs" || l.plat === "store" ? '<span class="muted" title="No auction numbers here">—</span>' : l.format === "bin" ? '<span class="muted" title="Buy It Now has no auction">—</span>' : `<input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">`}${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}</td>
       <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" class="stsel s-${l.status}" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
