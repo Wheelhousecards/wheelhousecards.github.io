@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261111135426";
+import { db, logout } from "./firebase.js?v=20261111172424";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261111135426";
-import { setupGate, gateMarkup } from "./gate.js?v=20261111135426";
-import { emailSend, contact } from "./firebase-config.js?v=20261111135426";
+} from "./ui.js?v=20261111172424";
+import { setupGate, gateMarkup } from "./gate.js?v=20261111172424";
+import { emailSend, contact } from "./firebase-config.js?v=20261111172424";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -285,7 +285,24 @@ function renderCustList() {
 
 const skuNum = l => { const n = parseInt(String(l.sku || "").replace(/\D/g, ""), 10); return isNaN(n) ? -1 : n; };
 const skuDesc = (a, b) => skuNum(b) - skuNum(a) || String(b.sku || "").localeCompare(String(a.sku || ""));
+// Customers who sent an asking price on an Awaiting-price card, newest first: shown at the top of the card list and in the browser tab.
+function renderAskAlert() {
+  const asks = S.all.filter(l => l.status === "awaitprice" && l.askPrice != null).sort((a, b) => String(b.askAt?.seconds ?? b.askAt ?? "").localeCompare(String(a.askAt?.seconds ?? a.askAt ?? "")));
+  const box = $("#ask-alert");
+  document.title = (asks.length ? `(${asks.length}) ` : "") + "Wheelhouse Consignment Staff";
+  box.hidden = !asks.length; if (!asks.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<b>${asks.length === 1 ? "A customer sent their asking price" : `${asks.length} customers sent their asking price`}</b>
+    <ul class="ask-list">${asks.slice(0, 6).map(l => `<li><button class="linkbtn code" type="button" data-open="${l.id}">${esc(l.sku)}</button> · ${esc(custById(l.cust)?.name || "")} · <b>${money(l.askPrice)}</b> · ${esc(l.title.length > 60 ? l.title.slice(0, 58) + "…" : l.title)}${l.askNote ? ` · “${esc(l.askNote)}”` : ""}</li>`).join("")}</ul>
+    <div class="row" style="gap:8px"><button class="btn sm" type="button" id="ask-show">Show ${asks.length === 1 ? "it" : "them"} in the card list</button><span class="muted">List each one on Fanatics at that price, then set it to Live.</span></div>`;
+}
+$("#ask-alert").addEventListener("click", e => {
+  if (e.target.id !== "ask-show") return;
+  ["#f-q", "#f-cust", "#f-plat", "#f-batch", "#f-added"].forEach(x => { $(x).value = ""; }); $("#f-st").value = "awaitprice";
+  ui.section = "all";
+  setView("play"); renderLedger(); $("#ledger-h").scrollIntoView({ block: "start" });
+});
 function renderLedger() {
+  renderAskAlert();
   const tb = $("#tbody");
   if (tb.contains(document.activeElement) && document.activeElement.tagName !== "BUTTON" && document.activeElement.type !== "checkbox") { tb.dataset.stale = "1"; return; }
   delete tb.dataset.stale;

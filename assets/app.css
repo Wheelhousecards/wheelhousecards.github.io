@@ -247,3 +247,6 @@ article.card.clickable{cursor:pointer;transition:border-color .12s,box-shadow .1
 article.card.clickable:hover{border-color:var(--ink,#111);box-shadow:0 2px 10px rgba(0,0,0,.06)}
 article.card.clickable:focus-visible{outline:2px solid var(--accent,#2d5bd7);outline-offset:2px}
 .notice.ask{border-left:4px solid #c97a12;background:#fff8ec}
+#ask-alert{display:grid;gap:8px;margin-bottom:14px;padding:12px 14px;border-radius:8px}
+#ask-alert[hidden]{display:none}
+.ask-list{margin:0;padding-left:18px;display:grid;gap:3px;font-size:14px}
