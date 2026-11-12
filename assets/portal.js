@@ -1,9 +1,9 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261112110320";
+import { db, logout } from "./firebase.js?v=20261112111952";
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261112110320";
-import { setupGate, gateMarkup } from "./gate.js?v=20261112110320";
-import { contact } from "./firebase-config.js?v=20261112110320";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261112111952";
+import { setupGate, gateMarkup } from "./gate.js?v=20261112111952";
+import { contact } from "./firebase-config.js?v=20261112111952";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
@@ -15,7 +15,7 @@ let unsubs = [], state = { customer: null, listings: [], batches: [] }, me = "";
 const dash = mountDashboard($("#dash"), "", {
   loadPhoto: async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; },
   // Customers can only set their asking price on a card that is Awaiting price (see firestore.rules).
-  askPrice: (id, price, note) => updateDoc(doc(db, "listings", id), { askPrice: price, askNote: note, askAt: serverTimestamp() }),
+  askPrice: (id, price, min) => updateDoc(doc(db, "listings", id), { askPrice: price, askMin: min, askAt: serverTimestamp() }),
 });
 createLightbox(
   id => {

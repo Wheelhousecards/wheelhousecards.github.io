@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261112110320";
+import { db, logout } from "./firebase.js?v=20261112111952";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -8,10 +8,10 @@ import {
   $, esc, money, PLAT, STAT, isAuctionNo, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
-  isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261112110320";
-import { setupGate, gateMarkup } from "./gate.js?v=20261112110320";
-import { emailSend, contact } from "./firebase-config.js?v=20261112110320";
+  isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText
+} from "./ui.js?v=20261112111952";
+import { setupGate, gateMarkup } from "./gate.js?v=20261112111952";
+import { emailSend, contact } from "./firebase-config.js?v=20261112111952";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -167,7 +167,7 @@ function listen() {
 const loadPhoto = async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; };
 const dash = mountDashboard($("#cust"), `<div class="sel" style="display:grid;gap:4px;width:min(280px,100%)"><label for="cv-pick">Preview as consignor</label><select id="cv-pick"></select></div>`, { loadPhoto, staff: true,
   // Staff can enter a price the customer gave them another way (phone, text, in store).
-  askPrice: (id, price, note) => updateDoc(listingRef(id), { askPrice: price, askNote: note, askAt: serverTimestamp(), askBy: me || "", updatedAt: serverTimestamp() }) });
+  askPrice: (id, price, min) => updateDoc(listingRef(id), { askPrice: price, askMin: min, askAt: serverTimestamp(), askBy: me || "", updatedAt: serverTimestamp() }) });
 $("#cv-pick").addEventListener("change", e => { ui.cv = e.target.value; try { history.replaceState({ v: "cust", cv: ui.cv }, "", "#customer"); } catch (err) {} render(); });
 // Opening a customer page adds a browser history entry, so the browser's back button
 // (and the "Back to staff" button) returns to the staff app where you left off.
@@ -294,7 +294,7 @@ function renderAskAlert() {
   document.title = (asks.length ? `(${asks.length}) ` : "") + "Wheelhouse Consignment Staff";
   box.hidden = !asks.length; if (!asks.length) { box.innerHTML = ""; return; }
   box.innerHTML = `<b>${asks.length === 1 ? "A customer sent their asking price" : `${asks.length} customers sent their asking price`}</b>
-    <ul class="ask-list">${asks.slice(0, 6).map(l => `<li><button class="linkbtn code" type="button" data-open="${l.id}">${esc(l.sku)}</button> · ${esc(custById(l.cust)?.name || "")} · <b>${money(l.askPrice)}</b> · ${esc(l.title.length > 60 ? l.title.slice(0, 58) + "…" : l.title)}${l.askNote ? ` · “${esc(l.askNote)}”` : ""}</li>`).join("")}</ul>
+    <ul class="ask-list">${asks.slice(0, 6).map(l => `<li><button class="linkbtn code" type="button" data-open="${l.id}">${esc(l.sku)}</button> · ${esc(custById(l.cust)?.name || "")} · <b>${money(l.askPrice)}</b>${askMinText(l)} · ${esc(l.title.length > 60 ? l.title.slice(0, 58) + "…" : l.title)}</li>`).join("")}</ul>
     <div class="row" style="gap:8px"><button class="btn sm" type="button" id="ask-show">Show ${asks.length === 1 ? "it" : "them"} in the card list</button><span class="muted">List each one on Fanatics at that price, then set it to Live.</span></div>`;
 }
 $("#ask-alert").addEventListener("click", e => {
@@ -368,7 +368,7 @@ function renderLedger() {
       <td class="title">${l.photo ? `<img src="${l.photo.thumb}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px">` : ""}${esc(l.title)}${isLot(l) ? `<div class="cert">${esc(lotLine(l))}</div>` : ""}${l.item ? `<div class="muted" style="font:12px var(--mono)">#${esc(l.item)}</div>` : ""}</td>
       <td>${gradeHtml(l, true)}</td>
       <td>${isDropoff(l) ? "Auction" : `<select data-f="format" aria-label="Format for SKU ${esc(l.sku)}"><option value="auction"${l.format !== "bin" ? " selected" : ""}>Auction</option><option value="bin"${l.format === "bin" ? " selected" : ""}>Buy It Now</option></select>`}</td>
-      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "awaitprice" ? `<div class="cert ${l.askPrice != null ? "ask-in" : ""}">${l.askPrice != null ? `Customer asked ${money(l.askPrice)}${l.askNote ? ` · “${esc(l.askNote)}”` : ""}` : "Waiting on customer’s price"}</div>` : ""}${l.status === "paid" || l.status === "sold" ? `<div class="cert">${shareText(cardPayout(l, custById(l.cust)), true)} to consignor${l.payout == null && !isDropoff(l) && cardSplit(l, custById(l.cust)) != null ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
+      <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "awaitprice" ? `<div class="cert ${l.askPrice != null ? "ask-in" : ""}">${l.askPrice != null ? `Customer asked ${money(l.askPrice)}${askMinText(l)}` : "Waiting on customer’s price"}</div>` : ""}${l.status === "paid" || l.status === "sold" ? `<div class="cert">${shareText(cardPayout(l, custById(l.cust)), true)} to consignor${l.payout == null && !isDropoff(l) && cardSplit(l, custById(l.cust)) != null ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
       <td class="num">${l.plat === "pcs" || l.plat === "store" ? '<span class="muted" title="No auction numbers here">—</span>' : l.format === "bin" ? '<span class="muted" title="Buy It Now has no auction">—</span>' : `<input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">`}${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}</td>
       <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" class="stsel s-${l.status}" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>

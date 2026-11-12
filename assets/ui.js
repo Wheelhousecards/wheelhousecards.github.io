@@ -203,13 +203,14 @@ export function soldCompsUrl(l) {
   const g = l.grade && !isRawGrade(l.grade) && !(l.title || "").toLowerCase().includes(String(l.grade).toLowerCase()) ? ` ${l.grade}` : "";
   return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(((l.title || "") + g).replace(/\s+/g, " ").trim())}&LH_Sold=1&LH_Complete=1&_sop=13`;
 }
+export const askMinText = l => l.askMin != null ? ` · lowest offer ${money(l.askMin)}` : l.askPrice != null && "askMin" in l ? " · no offers" : "";
 export function askFormHtml(l, staff = false) {
   return `<form class="askbox" data-askform="${esc(l.id)}">
     <h3 style="margin:0">${staff ? (l.askPrice != null ? "Change the customer’s asking price" : "Enter the customer’s asking price") : l.askPrice != null ? "Change your asking price" : "Set your asking price"}</h3>
     <p class="muted" style="margin:0">${staff ? "Customers see this box and fill it in themselves. If they gave you a price by phone, text or in the store, enter it here." : `This card will go up as a Buy It Now on ${PLAT[l.plat] || "the site"}. Tell us what you’d like to ask for it and we’ll list it.`}</p>
     <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
       <div class="f" style="flex:0 0 160px"><label for="ask-price">Asking price ($)</label><input id="ask-price" type="number" step="0.01" min="1" required inputmode="decimal" value="${l.askPrice ?? ""}" placeholder="e.g. 250"></div>
-      <div class="f" style="flex:1 1 220px"><label for="ask-note">Anything else? (optional)</label><input id="ask-note" maxlength="400" value="${esc(l.askNote || "")}" placeholder="e.g. open to offers above $200"></div>
+      <div class="f" style="flex:0 0 200px"><label for="ask-min">Lowest offer you’d take ($) <span class="muted">optional</span></label><input id="ask-min" type="number" step="0.01" min="1" inputmode="decimal" value="${l.askMin ?? ""}" placeholder="Leave blank for no offers"></div>
       <button class="btn" type="submit">${staff ? "Save price" : l.askPrice != null ? "Update my price" : "Send my price"}</button>
     </div>
     <a href="${soldCompsUrl(l)}" target="_blank" rel="noopener">See what this card has sold for on eBay ↗</a>
@@ -227,7 +228,7 @@ export function cardDetailHtml(l, c, { staff = false, canAsk = false } = {}) {
     ...(staff && c ? [["Consignor", `<span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${esc(c.id)}">${esc(c.name)}</button>`]] : []),
     ...(l.batch ? [["Batch", `<span class="code">${esc(l.batch)}</span>`]] : []),
     ...(l.added ? [["Added", fmtLong(l.added)]] : []),
-    ...(l.status === "awaitprice" && l.askPrice != null ? [[staff ? "Customer asked" : "Your asking price", money(l.askPrice) + (l.askNote ? ` <span class="muted">· “${esc(l.askNote)}”</span>` : "")]] : []),
+    ...(l.status === "awaitprice" && l.askPrice != null ? [[staff ? "Customer asked" : "Your asking price", money(l.askPrice) + `<span class="muted">${askMinText(l)}</span>`]] : []),
     ...(l.status === "awaitprice" && !canAsk ? [["eBay sold listings", `<a href="${soldCompsUrl(l)}" target="_blank" rel="noopener">See what it has sold for ↗</a>`]] : []),
     ...(l.status === "live" ? (l.format === "bin" || (l.period && !isAuctionNo(l.period)) ? [["Asking price", money(l.price)]] : [["Auction", l.ends ? (auctionOver(l.ends) ? `Ended ${fmtEnd(l.ends)} · results coming soon` : `Live · ends ${fmtEnd(l.ends)}`) : "Live now"], ...(bidLink(l) ? [["Current bid", `<a href="${esc(bidLink(l))}" target="_blank" rel="noopener">See it on ${PLAT[l.plat]} ↗</a>`]] : [])]) : []),
     ...(sold ? [["Sold", fmtLong(l.soldDate)], ["Sale price", money(l.price)], ...(l.net != null ? [["After PC Sportscards fees", money(l.net)]] : []), ...(cardFee(l) && l.payout == null ? [["Fanatics CGC Authentication service fee", "−" + money(cardFee(l))]] : []), [staff ? "Consignor portion" : "Your share", shareText(cardPayout(l, c), staff) + (staff && l.payout == null && cardSplit(l, c) != null ? ` (${cardSplit(l, c)}%${l.split != null && l.split !== "" ? ", set for this card" : ""})` : "")]] : []),
@@ -380,12 +381,13 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
   const openAsk = id => { const l = openCard(id); if (l) modal.body.querySelector("#ask-price")?.focus(); };
   modal.body.addEventListener("submit", async e => {
     const f = e.target.closest("[data-askform]"); if (!f) return; e.preventDefault();
-    const price = Math.round(parseFloat(f.querySelector("#ask-price").value) * 100) / 100, note = f.querySelector("#ask-note").value.trim().slice(0, 400), msg = f.querySelector("[data-askmsg]");
+    const price = Math.round(parseFloat(f.querySelector("#ask-price").value) * 100) / 100, mv = f.querySelector("#ask-min").value.trim(), min = mv ? Math.round(parseFloat(mv) * 100) / 100 : null, msg = f.querySelector("[data-askmsg]");
     if (!(price > 0)) { msg.textContent = "Enter a price above $0."; return; }
+    if (min != null && !(min > 0 && min <= price)) { msg.textContent = "The lowest offer should be more than $0 and no higher than the asking price."; return; }
     f.querySelector("button").disabled = true; msg.textContent = "Sending…";
     try {
-      await askPrice(f.dataset.askform, price, note);
-      const l = data.listings.find(x => x.id === f.dataset.askform); if (l) Object.assign(l, { askPrice: price, askNote: note, askAt: new Date().toISOString() });
+      await askPrice(f.dataset.askform, price, min);
+      const l = data.listings.find(x => x.id === f.dataset.askform); if (l) Object.assign(l, { askPrice: price, askMin: min, askAt: new Date().toISOString() });
       render(); openCard(f.dataset.askform);
       const m2 = modal.body.querySelector("[data-askmsg]"); if (m2) m2.textContent = staff ? "Saved. It’s in the asking-price alert on the staff page." : "Thanks — we got your price and will list it soon.";
     } catch (err) { f.querySelector("button").disabled = false; msg.innerHTML = `We couldn’t send that just now. Email your price to <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> and we’ll take care of it.`; }
