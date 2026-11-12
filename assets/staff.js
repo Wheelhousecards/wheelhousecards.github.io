@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261112155031";
+import { db, logout } from "./firebase.js?v=20261112170954";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText
-} from "./ui.js?v=20261112155031";
-import { setupGate, gateMarkup } from "./gate.js?v=20261112155031";
-import { emailSend, contact } from "./firebase-config.js?v=20261112155031";
+} from "./ui.js?v=20261112170954";
+import { setupGate, gateMarkup } from "./gate.js?v=20261112170954";
+import { emailSend, contact } from "./firebase-config.js?v=20261112170954";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1078,7 +1078,7 @@ async function openReceipt(b) {
     `Thanks for consigning with Wheelhouse. This is your receipt: we received ${b.cards ? `${b.cards} card${b.cards === 1 ? "" : "s"}` : "your cards"} from you on ${fmtDay(b.recv)} (batch ${b.id}), to be sold through ${PLAT[b.plat] || "our auction partners"}.`, "",
     photo && emailSend.attachments ? "A photo of the cards you dropped off is attached for both of our records." : null, photo && emailSend.attachments ? "" : null,
     `You can see every card from this drop-off in your Wheelhouse customer portal: ${SITE}`, "",
-    `As each card is listed and sold, the portal shows its status, the sale price and what you’ll receive.${photo || (b.photos || []).length ? " Your drop-off photos are there too." : ""} Curating and listing can take a little while, so cards appear as they go up.`, "",
+    `As each card is listed and sold, the portal shows its status, the sale price and what you’ll receive.${photo || (b.photos || []).length ? " Your drop-off photos are there too." : ""} Please allow some time for curation.`, "",
     `To sign in, use this email address (${c.email}). The first time, choose “Create account” with that same email.`, "",
     "Thanks,", "Wheelhouse"].filter(x => x !== null).join("\n");
   openMail(c, null, { subject: `Wheelhouse consignment receipt: batch ${b.id}`, body }, {
