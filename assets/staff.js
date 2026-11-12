@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261112145004";
+import { db, logout } from "./firebase.js?v=20261112155031";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText
-} from "./ui.js?v=20261112145004";
-import { setupGate, gateMarkup } from "./gate.js?v=20261112145004";
-import { emailSend, contact } from "./firebase-config.js?v=20261112145004";
+} from "./ui.js?v=20261112155031";
+import { setupGate, gateMarkup } from "./gate.js?v=20261112155031";
+import { emailSend, contact } from "./firebase-config.js?v=20261112155031";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1077,7 +1077,9 @@ async function openReceipt(b) {
   const body = [`Hi ${first},`, "",
     `Thanks for consigning with Wheelhouse. This is your receipt: we received ${b.cards ? `${b.cards} card${b.cards === 1 ? "" : "s"}` : "your cards"} from you on ${fmtDay(b.recv)} (batch ${b.id}), to be sold through ${PLAT[b.plat] || "our auction partners"}.`, "",
     photo && emailSend.attachments ? "A photo of the cards you dropped off is attached for both of our records." : null, photo && emailSend.attachments ? "" : null,
-    `Curating and listing can take a little while. You can follow your cards anytime at ${SITE}. Sign in (or create an account) with this email address.`, "",
+    `You can see every card from this drop-off in your Wheelhouse customer portal: ${SITE}`, "",
+    `As each card is listed and sold, the portal shows its status, the sale price and what you’ll receive.${photo || (b.photos || []).length ? " Your drop-off photos are there too." : ""} Curating and listing can take a little while, so cards appear as they go up.`, "",
+    `To sign in, use this email address (${c.email}). The first time, choose “Create account” with that same email.`, "",
     "Thanks,", "Wheelhouse"].filter(x => x !== null).join("\n");
   openMail(c, null, { subject: `Wheelhouse consignment receipt: batch ${b.id}`, body }, {
     title: "Receipt email", photo, out: "#b-msg",
@@ -1353,7 +1355,7 @@ function renderBatches() {
       <td class="num">${b.ship ? fmtDay(b.ship) : '<span class="need">Not shipped</span>'}</td>
       <td class="num">${cards.some(isDropoff) ? (() => { const its = cards.filter(isDropoff).flatMap(d => d.items || []); return `${b.cards || its.length} sent<div class="cert">${cards.filter(isDropoff).length} drop-offs · ${its.length} itemized · ${its.filter(x => x.status === "sold" || x.status === "paid").length} sold</div>`; })() : `${b.cards || cards.length} sent<div class="cert">${cards.length} listed · ${sold} sold</div>`}</td>
       <td>${thumbsHtml(b, 3)}</td>
-      <td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn ghost sm" type="button" data-ba="cards">Show cards</button><button class="btn ghost sm" type="button" data-ba="edit">Edit</button><button class="btn ghost sm" type="button" data-ba="del">${bDelArm === b.id ? "Click again to remove" : "Remove"}</button></div></td>
+      <td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn ghost sm" type="button" data-ba="cards">Show cards</button>${c?.email ? `<button class="btn ghost sm" type="button" data-ba="receipt" title="${b.receiptAt ? `Receipt sent ${esc(fmtDay(String(b.receiptAt).slice(0, 10)))}` : "No receipt sent yet"}">${b.receiptAt ? "Resend receipt" : "Email receipt"}</button>` : ""}<button class="btn ghost sm" type="button" data-ba="edit">Edit</button><button class="btn ghost sm" type="button" data-ba="del">${bDelArm === b.id ? "Click again to remove" : "Remove"}</button></div></td>
     </tr>`;
     // PC shipments: one line per customer drop-off SKU inside the batch.
     const drops = cards.filter(isDropoff).sort((a, b) => (custById(a.cust)?.name || "").localeCompare(custById(b.cust)?.name || "") || (a.dropDate || "").localeCompare(b.dropDate || ""));
@@ -1454,6 +1456,7 @@ $("#bf-sort").addEventListener("change", renderBatches);
 $("#b-body").addEventListener("click", async e => {
   const a = e.target.dataset.ba; if (!a) return;
   const id = e.target.closest("tr").dataset.b, b = batchById(id); if (!b) return;
+  if (a === "receipt") { e.target.disabled = true; try { await openReceipt(b); } finally { e.target.disabled = false; } return; }
   if (a === "cards") {
     ["#f-q", "#f-plat", "#f-st"].forEach(s => { $(s).value = ""; }); $("#f-cust").value = ""; $("#f-batch").value = id; bDelArm = ""; renderLedger();
     $("#ledger").scrollIntoView({ block: "start" });
