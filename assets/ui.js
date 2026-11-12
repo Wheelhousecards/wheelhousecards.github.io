@@ -203,14 +203,14 @@ export function soldCompsUrl(l) {
   const g = l.grade && !isRawGrade(l.grade) && !(l.title || "").toLowerCase().includes(String(l.grade).toLowerCase()) ? ` ${l.grade}` : "";
   return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(((l.title || "") + g).replace(/\s+/g, " ").trim())}&LH_Sold=1&LH_Complete=1&_sop=13`;
 }
-export const askMinText = l => l.askMin != null ? ` · lowest offer ${money(l.askMin)}` : l.askPrice != null && "askMin" in l ? " · no offers" : "";
+export const askMinText = l => l.askMin != null ? ` · minimum offer ${money(l.askMin)}` : l.askPrice != null && "askMin" in l ? " · no offers" : "";
 export function askFormHtml(l, staff = false) {
   return `<form class="askbox" data-askform="${esc(l.id)}">
     <h3 style="margin:0">${staff ? (l.askPrice != null ? "Change the customer’s asking price" : "Enter the customer’s asking price") : l.askPrice != null ? "Change your asking price" : "Set your asking price"}</h3>
     <p class="muted" style="margin:0">${staff ? "Customers see this box and fill it in themselves. If they gave you a price by phone, text or in the store, enter it here." : `This card will go up as a Buy It Now on ${PLAT[l.plat] || "the site"}. Tell us what you’d like to ask for it and we’ll list it.`}</p>
     <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
       <div class="f" style="flex:0 0 160px"><label for="ask-price">Asking price ($)</label><input id="ask-price" type="text" inputmode="decimal" autocomplete="off" required value="${l.askPrice ?? ""}" placeholder="e.g. 250"></div>
-      <div class="f" style="flex:0 0 200px"><label for="ask-min">Lowest offer you’d take ($) <span class="muted">optional</span></label><input id="ask-min" type="text" inputmode="decimal" autocomplete="off" value="${l.askMin ?? ""}" placeholder="Leave blank for no offers"></div>
+      <div class="f" style="flex:0 0 200px"><label for="ask-min">Minimum Offer (Optional)</label><input id="ask-min" type="text" inputmode="decimal" autocomplete="off" value="${l.askMin ?? ""}" placeholder="Leave blank for no offers"></div>
       <button class="btn" type="submit">${staff ? "Save price" : l.askPrice != null ? "Update my price" : "Send my price"}</button>
     </div>
     <a href="${soldCompsUrl(l)}" target="_blank" rel="noopener">See what this card has sold for on eBay ↗</a>
@@ -384,8 +384,8 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
     const num = v => Math.round(parseFloat(String(v).replace(/[$,\s]/g, "")) * 100) / 100; // accepts 250, $250, 1,250.50
     const price = num(f.querySelector("#ask-price").value), mv = f.querySelector("#ask-min").value.trim(), min = mv ? num(mv) : null, msg = f.querySelector("[data-askmsg]");
     if (!(price > 0)) { msg.textContent = "Enter a price above $0."; return; }
-    if (min != null && isNaN(min)) { msg.textContent = "Enter the lowest offer as a number, like 200."; return; }
-    if (min != null && !(min > 0 && min <= price)) { msg.textContent = "The lowest offer should be more than $0 and no higher than the asking price."; return; }
+    if (min != null && isNaN(min)) { msg.textContent = "Enter the minimum offer as a number, like 200."; return; }
+    if (min != null && !(min > 0 && min <= price)) { msg.textContent = "The minimum offer should be more than $0 and no higher than the asking price."; return; }
     f.querySelector("button").disabled = true; msg.textContent = "Sending…";
     try {
       await askPrice(f.dataset.askform, price, min);
