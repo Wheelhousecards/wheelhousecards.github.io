@@ -251,3 +251,9 @@ article.card.clickable:focus-visible{outline:2px solid var(--accent,#2d5bd7);out
 #ask-alert[hidden]{display:none}
 .ask-list{margin:0;padding-left:18px;display:grid;gap:3px;font-size:14px}
 .askbox{display:grid;gap:10px;padding:14px;border:1px solid #f0b35c;border-left:4px solid #c97a12;border-radius:8px;background:#fff8ec}
+.statement .grp td{font-weight:700}
+.statement tr.held td{opacity:.5}
+.statement tr.held td:first-child{opacity:1}
+tr.stmt-row > td{background:var(--soft,#f6f7f9);padding:10px 12px}
+article.card.payout details summary{cursor:pointer;color:var(--accent,#2d5bd7);font-size:14px}
+article.card.payout details[open] summary{margin-bottom:8px}

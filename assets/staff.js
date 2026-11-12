@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261112170954";
+import { db, logout } from "./firebase.js?v=20261112185927";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -8,10 +8,11 @@ import {
   $, esc, money, PLAT, STAT, isAuctionNo, pad6, plural, isSold, detect, normGrade, gradeHtml, timeLeft,
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
-  isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText
-} from "./ui.js?v=20261112170954";
-import { setupGate, gateMarkup } from "./gate.js?v=20261112170954";
-import { emailSend, contact } from "./firebase-config.js?v=20261112170954";
+  isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
+  statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey
+} from "./ui.js?v=20261112185927";
+import { setupGate, gateMarkup } from "./gate.js?v=20261112185927";
+import { emailSend, contact } from "./firebase-config.js?v=20261112185927";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1006,18 +1007,23 @@ const SITE = "https://wheelhousecards.github.io/consignment";
 let paidArm = "";
 function payoutEmail(c, o) {
   const first = (c.name || "").split(/\s+/)[0] || "there";
-  const lines = o.cards.slice(0, 15).map(l => `- SKU ${l.sku} · ${l.title}: sold for ${money(l.price)}`); // not used right now
-  if (o.cards.length > 15) lines.push(`- …and ${o.cards.length - 15} more on your page`);
+  const lines = o.lines.filter(x => !x.held);
+  const when = x => x.from && x.from !== x.sold ? `${fmtDay(x.from.slice(0, 10))}–${fmtDay(x.sold.slice(0, 10))}` : x.sold ? fmtDay(x.sold.slice(0, 10)) : "";
+  const stmt = [...new Set(lines.map(x => x.plat))].flatMap(g => [PLAT[g] || g, ...lines.filter(x => x.plat === g).map(x => x.kind === "drop"
+    ? `- SKU ${x.sku} · ${x.title}: ${x.n} card${x.n === 1 ? "" : "s"} sold ${when(x)} for ${money(x.price)} · you get ${money(x.amt)}`
+    : `- SKU ${x.sku} · ${x.title}: sold ${when(x)} for ${money(x.price)}${x.fee ? ` (−${money(x.fee)} fee)` : ""} · you get ${money(x.amt)}`), ""]);
+  const label = o.month ? `${monthLabel(o.month, true)} payout` : "payout";
   const body = [
     `Hi ${first},`, "",
-    `You have a Wheelhouse consignment payout of ${money(o.amount)} coming your way.`, "",
-    // Card-by-card list left out for now; add `...(o.cards.length ? [...lines, ""] : [])` here to bring it back.
-    ...(c.payable ? [`Includes ${money(c.payable)} carried over from your previous balance.`, ""] : []),
-    ...((o.deductions || []).length ? [...o.deductions.map(x => `- ${x.title}: sale reversed by buyer, −${money(x.reversal.amount)}, relisted.`), ""] : []),
+    `Your Wheelhouse consignment ${label} is ${money(o.amount)}${o.month ? ` for everything that sold in ${monthLabel(o.month)}` : ""}. Here’s what it covers:`, "",
+    ...stmt,
+    ...(c.payable ? [`Carried over from your previous balance: ${money(c.payable)}`, ""] : []),
+    ...((o.deductions || []).length ? [...o.deductions.map(x => `- ${x.title}: sale reversed by buyer, −${money(x.reversal.amount)}`), ""] : []),
+    `Total: ${money(o.amount)}`, "",
     payLine(c) ? `We’ll send it by ${payLine(c)}. If that’s changed, just reply and let us know.` : "How would you like to be paid: Venmo, PayPal or check? Reply with your handle, PayPal email or mailing address.",
-    "", `You can see all your cards and sales anytime at ${SITE}`, "", "Thanks,", "Wheelhouse",
+    "", `You can see all your cards, sales and payouts anytime at ${SITE}`, "", "Thanks,", "Wheelhouse",
   ].join("\n");
-  return { subject: `Your Wheelhouse consignment payout: ${money(o.amount)}`, body };
+  return { subject: `Your Wheelhouse consignment ${label}: ${money(o.amount)}`, body };
 }
 /* Payout email: preview, edit, approve and send from here. Sends through EmailJS when it's set up. */
 const mailBox = createModal();
@@ -1135,25 +1141,72 @@ dl(rows,"fanatics-links");document.title="Downloaded "+ids.length+" cards";})()`
   const el = $("#fan-grab"); if (el) { el.href = "javascript:" + encodeURIComponent(code.replace(/\n/g, "")); el.addEventListener("click", e => { e.preventDefault(); $("#fan-grab-msg").textContent = "That’s expected here: drag the button onto your bookmarks bar, then click the bookmark while you’re on the Fanatics page."; });
     $("#fan-grab-copy")?.addEventListener("click", async () => { try { await navigator.clipboard.writeText(el.href); $("#fan-grab-msg").textContent = "Copied. Right-click your bookmarks bar → Add page, name it “Grab Fanatics links”, and paste into the URL box."; } catch (err) { $("#fan-grab-msg").textContent = "Your browser blocked copying. Drag the button instead."; } }); }
 })();
+const payHold = new Set(), payOpen = new Set();
+const payMonth = () => $("#p-month").value || lastMonthKey();
+const owedNow = c => ({ ...owedFor(c, S.active, { through: monthEnd(payMonth()), hold: payHold }), month: payMonth() });
+$("#p-month").value = lastMonthKey();
+$("#p-month").addEventListener("change", () => { paidArm = ""; renderPayouts(); });
 function renderPayouts() {
-  const rows = S.customers.filter(c => !isHouse(c)).map(c => ({ c, o: owedFor(c, S.active) })).filter(x => x.o.amount > 0.004 || x.o.needPct).sort((a, b) => b.o.amount - a.o.amount);
-  $("#p-total").textContent = rows.length ? `${money(rows.reduce((s, x) => s + x.o.amount, 0))} owed to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
+  const M = payMonth();
+  const rows = S.customers.filter(c => !isHouse(c)).map(c => ({ c, o: owedNow(c) })).filter(x => x.o.lines.length || x.o.amount > 0.004 || x.o.needPct).sort((a, b) => b.o.amount - a.o.amount);
+  $("#p-total").textContent = rows.length ? `${monthLabel(M, true)} payout: ${money(rows.reduce((s, x) => s + x.o.amount, 0))} to ${rows.length} consignor${rows.length === 1 ? "" : "s"}` : "";
   $("#p-body").innerHTML = rows.length ? rows.map(({ c, o }) => {
-    const canMail = !!c.email;
+    const canMail = !!c.email, open = payOpen.has(c.id), nHeld = o.lines.filter(x => x.held).length;
     return `<tr data-c="${c.id}">
-      <td><span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button></td>
-      <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}${o.deducted ? `<div class="cert">−${money(o.deducted)} reversed sale${o.deductions.length === 1 ? "" : "s"}</div>` : ""}</td>
-      <td class="num">${o.count}${o.needPct ? `<div class="flag">${o.needPct} PC sale${o.needPct === 1 ? "" : "s"} need a %</div>` : ""}</td>
+      <td><span class="code">${esc(c.code)}</span> <button class="linkbtn" type="button" data-cust="${c.id}">${esc(c.name)}</button><div><button class="linkbtn" type="button" data-pa="stmt" aria-expanded="${open}">${open ? "Hide statement" : "Statement"}</button></div></td>
+      <td class="num" style="font-weight:600">${money(o.amount)}${c.payable ? `<div class="cert">${money(c.payable)} carried over</div>` : ""}${o.deducted ? `<div class="cert">−${money(o.deducted)} reversed sale${o.deductions.length === 1 ? "" : "s"}</div>` : ""}${nHeld ? `<div class="flag">${nHeld} held for next month</div>` : ""}</td>
+      <td class="num">${o.count}${o.awaiting ? `<div class="cert">${o.awaiting} awaiting buyer payment</div>` : ""}${o.needPct ? `<div class="flag">${o.needPct} PC sale${o.needPct === 1 ? "" : "s"} need a %</div>` : ""}</td>
       <td style="max-width:240px;overflow-wrap:anywhere">${payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>'}</td>
       <td class="num">${c.notifiedAt ? fmtDay(c.notifiedAt.slice(0, 10)) + (c.notifiedAmount != null && Math.abs(c.notifiedAmount - o.amount) > 0.004 ? `<div class="cert">was ${money(c.notifiedAmount)}</div>` : "") : '<span class="muted">Not yet</span>'}</td>
       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${canMail ? `<a class="btn ghost sm" data-pa="mail" href="#">Email</a><button class="btn ghost sm" type="button" data-pa="copy">Copy message</button>` : `<span class="muted" style="font-size:12px">No email on file</span>`}<button class="btn sm" type="button" data-pa="paid">${paidArm === c.id ? `Confirm ${money(o.amount)} paid` : "Mark paid"}</button></div></td>
-    </tr>`;
-  }).join("") : '<tr><td colspan="6"><div class="empty">Nobody is owed a payout right now. Cards marked Sold show up here.</div></td></tr>';
+    </tr>${open ? `<tr class="stmt-row" data-c="${c.id}"><td colspan="6">${statementHtml(o.lines, { staff: true, holdable: true, carried: c.payable || 0, deducted: o.deducted })}</td></tr>` : ""}`;
+  }).join("") : `<tr><td colspan="6"><div class="empty">Nobody is owed anything for sales through the end of ${esc(monthLabel(M, true))}.</div></td></tr>`;
+  renderPayHistory();
 }
+// Every payout ever logged, by payout month, with an Excel export for the books.
+function payHistRows() {
+  return S.customers.flatMap(c => (c.payouts || []).map((p, i) => ({ c, p, i }))).sort((a, b) => (b.p.date || "").localeCompare(a.p.date || ""));
+}
+function renderPayHistory() {
+  const all = payHistRows(), sel = $("#ph-month"), cur = sel.value;
+  const months = [...new Set(all.map(r => r.p.month || monthKey(r.p.date)))].sort().reverse();
+  sel.innerHTML = `<option value="">All months</option>` + months.map(k => `<option value="${k}">${esc(monthLabel(k, true))}</option>`).join("");
+  if (months.includes(cur)) sel.value = cur;
+  const rows = all.filter(r => !sel.value || (r.p.month || monthKey(r.p.date)) === sel.value);
+  $("#ph-total").textContent = rows.length ? `${money(rows.reduce((t, r) => t + (r.p.amount || 0), 0))} across ${rows.length} payout${rows.length === 1 ? "" : "s"}` : "";
+  $("#ph-body").innerHTML = rows.length ? rows.map(({ c, p, i }) => `<tr data-c="${c.id}" data-i="${i}">
+      <td class="num">${fmtDay(p.date)}</td><td>${p.month ? esc(monthLabel(p.month, true)) : '<span class="muted">—</span>'}</td>
+      <td><span class="code">${esc(c.code)}</span> ${esc(c.name)}</td><td class="num">${p.cards || ""}</td><td class="num" style="font-weight:600">${money(p.amount || 0)}</td>
+      <td>${esc(PAYM[p.method] || p.method || "")}${p.payTo ? `<div class="cert">${esc(p.payTo)}</div>` : ""}</td><td class="cert">${esc(p.by || "")}</td>
+      <td>${p.lines?.length ? `<button class="linkbtn" type="button" data-ph="lines">Cards</button>` : ""}</td></tr>`).join("") : '<tr><td colspan="8"><div class="empty">No payouts logged yet.</div></td></tr>';
+}
+$("#ph-month").addEventListener("change", renderPayHistory);
+$("#ph-body").addEventListener("click", e => {
+  if (e.target.dataset.ph !== "lines") return;
+  const tr = e.target.closest("tr"), c = custById(tr.dataset.c), p = c?.payouts?.[+tr.dataset.i]; if (!p) return;
+  detail.open(`<h2 style="margin:0 0 4px">${esc(c.name)} · ${p.month ? esc(monthLabel(p.month, true)) + " payout" : "Payout"}</h2><p class="muted" style="margin:0 0 12px">Paid ${fmtDay(p.date)} · ${money(p.amount)}${p.method ? ` · ${esc(PAYM[p.method] || p.method)}` : ""}</p>${statementHtml(p.lines, { staff: true, carried: p.carried, deducted: p.deducted })}`);
+});
+$("#ph-export").addEventListener("click", () => {
+  const sel = $("#ph-month").value, rows = payHistRows().filter(r => !sel || (r.p.month || monthKey(r.p.date)) === sel);
+  const summary = [["Paid", "Payout month", "Consignor code", "Consignor", "Cards", "Amount", "Method", "Pay to", "Logged by"],
+    ...rows.map(({ c, p }) => [p.date, p.month ? monthLabel(p.month, true) : "", c.code, c.name, p.cards || 0, p.amount || 0, PAYM[p.method] || p.method || "", p.payTo || "", p.by || ""])];
+  const detailRows = [["Paid", "Payout month", "Consignor code", "Consignor", "Platform", "SKU", "Card", "Cards sold", "Sold", "Sale", "Fee", "Paid to consignor"],
+    ...rows.flatMap(({ c, p }) => (p.lines || []).map(x => [p.date, p.month ? monthLabel(p.month, true) : "", c.code, c.name, PLAT[x.plat] || x.plat, x.sku, x.title, x.n || 1, x.from && x.from !== x.sold ? `${x.from.slice(0, 10)} to ${(x.sold || "").slice(0, 10)}` : (x.sold || "").slice(0, 10), x.price || 0, x.fee || 0, x.amt || 0]))];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), "Payouts");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detailRows), "Cards");
+  XLSX.writeFile(wb, `wheelhouse-payouts-${sel || "all"}.xlsx`);
+});
+$("#p-body").addEventListener("change", e => {
+  if (!e.target.classList.contains("pay-incl")) return;
+  e.target.checked ? payHold.delete(e.target.dataset.key) : payHold.add(e.target.dataset.key);
+  paidArm = ""; renderPayouts();
+});
 $("#p-body").addEventListener("click", async e => {
   const t = e.target.closest("[data-pa]"); if (!t) return;
   const c = custById(t.closest("tr").dataset.c); if (!c) return;
-  const o = owedFor(c, S.active), msg = $("#p-msg");
+  const o = owedNow(c), msg = $("#p-msg");
+  if (t.dataset.pa === "stmt") { payOpen.has(c.id) ? payOpen.delete(c.id) : payOpen.add(c.id); renderPayouts(); return; }
   if (t.dataset.pa === "mail" || t.dataset.pa === "copy") {
     e.preventDefault();
     const m = payoutEmail(c, o);
@@ -1169,16 +1222,20 @@ $("#p-body").addEventListener("click", async e => {
     if (paidArm !== c.id) { paidArm = c.id; renderPayouts(); return; }
     paidArm = "";
     await guarded(msg, async () => {
-      const entry = { date: today(), amount: Math.round(o.amount * 100) / 100, cards: o.count, method: c.payMethod || "", payTo: c.payMethod === "check" ? (c.mailing || "") : (c.payTo || ""), by: me };
-      const ops = o.cards.map(l => upd(l.id, { status: "paid" }));
-      const lots = new Map();
+      const r2 = n => Math.round(n * 100) / 100, M = o.month;
+      const entry = { date: today(), month: M, amount: r2(o.amount), cards: o.count, method: c.payMethod || "", payTo: c.payMethod === "check" ? (c.mailing || "") : (c.payTo || ""), by: me,
+        lines: o.lines.filter(x => !x.held).map(x => ({ kind: x.kind, plat: x.plat, sku: x.sku || "", title: x.title || "", sold: (x.sold || "").slice(0, 10), from: (x.from || "").slice(0, 10), price: r2(x.price || 0), fee: x.fee || 0, amt: r2(x.amt || 0), n: x.n || 1 })),
+        ...(c.payable ? { carried: r2(c.payable) } : {}) };
+      const ops = o.cards.map(l => upd(l.id, { status: "paid", paidOut: today(), payoutMonth: M }));
+      const lots = new Map(), payIds = new Set(o.dropItems.map(x => x.lot.id + "|" + x.pcsId));
       o.dropItems.forEach(x => lots.set(x.lot.id, x.lot));
       (o.deductions || []).forEach(x => lots.set(x.lot.id, x.lot));
-      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => x.status === "sold" && itemPct(x, l, c) != null ? { ...x, status: "paid", paidOut: today() } : x.reversal?.deduct && !x.reversal.applied ? { ...x, reversal: { ...x.reversal, applied: today() } } : x)))));
+      lots.forEach(l => ops.push(upd(l.id, dropPatch((l.items || []).map(x => payIds.has(l.id + "|" + x.pcsId) ? { ...x, status: "paid", paidOut: today(), payoutMonth: M } : x.reversal?.deduct && !x.reversal.applied ? { ...x, reversal: { ...x.reversal, applied: today() } } : x)))));
       if (o.deducted) entry.deducted = Math.round(o.deducted * 100) / 100;
       ops.push(["update", doc(db, "customers", c.id), { payable: 0, payouts: [...(c.payouts || []), entry], notifiedAt: "", notifiedAmount: null }]);
       await commit(ops);
-      msg.textContent = `Logged a ${money(entry.amount)} payout to ${c.name}. Their sold cards are now Paid out.`;
+      payOpen.delete(c.id); o.lines.forEach(x => payHold.delete(x.key));
+      msg.textContent = `Logged ${c.name}’s ${monthLabel(M, true)} payout of ${money(entry.amount)}. Those cards now show “Paid in ${monthLabel(M)} payout”.`;
     });
   }
 });

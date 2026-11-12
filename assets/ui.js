@@ -56,17 +56,29 @@ export const isDropoff = l => !!(l && l.kind === "dropoff");
 // sold: PC Sportscards received payment, so Wheelhouse owes the consignor. cancelled: the sale fell through (unpaid or returned)
 // and PC Sportscards relists it under a new card #; relistedAs points to the new listing.
 export const ITEM_STAT = { live: "Listed", awaiting: "Awaiting payment", sold: "Sold", paid: "Paid out", unsold: "Unsold", cancelled: "Sale cancelled" };
-export const CUST_ITEM_STAT = { live: "Listed", awaiting: "Sold · payment pending", sold: "Sold", paid: "Paid out", unsold: "Unsold", cancelled: "Being relisted" };
+export const CUST_ITEM_STAT = { live: "Listed", awaiting: "Sold", sold: "Sold", paid: "Paid out", unsold: "Unsold", cancelled: "Being relisted" };
 // What the customer sees: a cancelled sale that's been relisted shows only as the new listing.
-export const custItems = items => (items || []).filter(x => !(x.status === "cancelled" && x.relistedAs));
+// Monthly payouts: a sale belongs to the month it sold in, and is paid around the 5th of the next month.
+export const monthKey = d => (d || "").slice(0, 7);
+export const monthLabel = (k, withYear) => { if (!k) return ""; const d = new Date(k + "-15T12:00:00"); return d.toLocaleDateString("en-US", { month: "long", ...(withYear || d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) }); };
+export const monthEnd = k => { const [y, m] = k.split("-").map(Number); return `${k}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`; };
+export const lastMonthKey = (d = new Date()) => { const x = new Date(d.getFullYear(), d.getMonth() - 1, 15); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`; };
+export const payMonthOf = x => x.payoutMonth || monthKey(x.soldDate);
+// Customer-facing note under a sale: which monthly payout it is (or was) in.
+export const payNote = x => x.status === "paid" || (x.reversal && !x.reversal.deduct) ? (payMonthOf(x) ? `Paid in ${monthLabel(payMonthOf(x))} payout` : "Paid out") : ["sold", "awaiting", "pending"].includes(x.status) && x.soldDate ? `In your ${monthLabel(monthKey(x.soldDate))} payout` : "";
+// A relist of a sale reversed after payout belongs to Wheelhouse (the customer was already paid), unless staff chose to deduct the reversal.
+export const isHouseRelist = (x, items) => { if (!x.relistOf) return false; const o = (items || []).find(y => y.pcsId === x.relistOf); return !!(o && o.reversal && !o.reversal.deduct); };
+// What the customer sees in a drop-off: sales reversed after payout stay as Paid, and their relists (Wheelhouse's) are hidden; a sale cancelled before payout just disappears behind its relist.
+export const custItems = items => (items || []).filter(x => !isHouseRelist(x, items) && !(x.status === "cancelled" && x.relistedAs && !(x.reversal && !x.reversal.deduct)))
+  .map(x => x.reversal && !x.reversal.deduct ? { ...x, status: "paid" } : x);
 // A card's earlier sales that fell through, oldest first, as one line: Sold $55 · Oct 28 → Buyer didn't pay — relisted Nov 3 → …
 const shortDay = d => d ? new Date(d.slice(0, 10) + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
-export function itemHistory(x, items) {
+export function itemHistory(x, items, staff = true) {
   const by = new Map((items || []).map(y => [y.pcsId, y]));
   const chain = []; let cur = x;
   if (x.status === "cancelled" && !x.relistedAs) chain.unshift({ o: x, next: null });
   for (let k = 0; cur.relistOf && by.get(cur.relistOf) && k < 10; k++) { const o = by.get(cur.relistOf); chain.unshift({ o, next: cur }); cur = o; }
-  if (!chain.length) return "";
+  if (!chain.length || (!staff && !chain.some(({ o }) => o.reversal?.deduct))) return "";
   const steps = [];
   chain.forEach(({ o, next }) => {
     steps.push(`<b>Sold ${money(o.price)}${o.soldDate ? ` · ${shortDay(o.soldDate)}` : ""}</b>`);
@@ -76,7 +88,7 @@ export function itemHistory(x, items) {
   if (x.status !== "cancelled" || x.relistedAs) steps.push(x.status === "live" ? "Live on eBay" : `<b>${CUST_ITEM_STAT[x.status] || ""}${x.status === "sold" || x.status === "paid" || x.status === "awaiting" ? ` ${money(x.price)}${x.soldDate ? ` · ${shortDay(x.soldDate)}` : ""}` : ""}</b>`);
   return `<div class="hist">${steps.join(" <span aria-hidden=\"true\">→</span> ")}</div>`;
 }
-export const RELIST_NOTE = "Sometimes an eBay buyer doesn’t pay or returns a card. When that happens it’s relisted, and you’re paid once, when the final sale is completed.";
+export const RELIST_NOTE = "Sometimes an eBay buyer returns a card. When that happens it’s relisted, and the new sale replaces the old one.";
 // PC Sportscards' eBay seller name. Once set, "Find on eBay" only searches their listings.
 export const PCS_SELLER = "pc_sportscards";
 // Searches eBay for the card's exact PC Sportscards title (limited to their store once PCS_SELLER is set).
@@ -98,19 +110,48 @@ export function dropoffSummary(items = []) {
   return { status, live: n("live"), awaiting: n("awaiting"), sold: n("sold"), paid: n("paid"), unsold: n("unsold"), cancelled: n("cancelled"), relisting: open,
     cards: items.length - (n("cancelled") - open), gross: soldItems.reduce((s, x) => s + (x.price || 0), 0), net: soldItems.reduce((s, x) => s + (x.net || 0), 0) };
 }
-// What Wheelhouse owes this consignor right now: sold-but-unpaid cards at their rate, plus any carried-over balance.
-export function owedFor(c, listings) {
+// What Wheelhouse owes this consignor: every sale not yet paid out (first sale price, even if the buyer hasn't paid yet),
+// optionally only sales through a month-end cutoff, minus any lines staff are holding for next month.
+// Returns statement lines too: one per card, one per PC drop-off.
+// A payout statement: Fanatics and PC Sportscards sections, one line per card or drop-off.
+export function statementHtml(lines, { staff = false, deducted = 0, carried = 0, holdable = false } = {}) {
+  const groups = [...new Set(lines.map(x => x.plat))];
+  const row = x => `<tr class="${x.held ? "held" : ""}">${holdable ? `<td><input type="checkbox" class="pay-incl" data-key="${esc(x.key)}" ${x.held ? "" : "checked"} aria-label="Include SKU ${esc(x.sku)} in this payout"></td>` : ""}
+    <td><span class="code">${esc(x.sku || "")}</span></td>
+    <td class="title">${esc(x.title || "")}${x.kind === "drop" ? `<div class="cert">${x.n} card${x.n === 1 ? "" : "s"} sold</div>` : ""}${staff && x.awaiting ? `<div class="flag">${x.kind === "drop" ? `${x.awaiting} awaiting buyer payment` : "Awaiting buyer payment"}</div>` : ""}${staff && x.held ? '<div class="flag">Held for next month</div>' : ""}</td>
+    <td class="num">${x.from && x.from !== x.sold ? `${fmtDay(x.from.slice(0, 10))}–${fmtDay(x.sold.slice(0, 10))}` : x.sold ? fmtDay(x.sold.slice(0, 10)) : ""}</td>
+    <td class="num">${money(x.price || 0)}${x.fee ? `<div class="cert">−${money(x.fee)} fee</div>` : ""}</td>
+    <td class="num" style="font-weight:600">${money(x.amt || 0)}</td></tr>`;
+  const cols = holdable ? 6 : 5;
+  const total = lines.filter(x => !x.held).reduce((t, x) => t + (x.amt || 0), 0) + (carried || 0) - (deducted || 0);
+  return `<div class="tbl-wrap"><table class="prev statement"><thead><tr>${holdable ? '<th title="Include in this payout">Pay</th>' : ""}<th>SKU</th><th>Card</th><th>Sold</th><th>Sale</th><th>${staff ? "They get" : "You get"}</th></tr></thead><tbody>
+    ${groups.map(g => `<tr class="grp"><td colspan="${cols}">${PLAT[g] || g}</td></tr>${lines.filter(x => x.plat === g).map(row).join("")}`).join("")}
+    ${carried ? `<tr><td colspan="${cols - 1}">Carried over from before</td><td class="num">${money(carried)}</td></tr>` : ""}
+    ${deducted ? `<tr><td colspan="${cols - 1}">Reversed sale deducted</td><td class="num">−${money(deducted)}</td></tr>` : ""}
+    <tr class="grp"><td colspan="${cols - 1}">Total</td><td class="num">${money(total)}</td></tr></tbody></table></div>`;
+}
+export function owedFor(c, listings, { through = "", hold = null } = {}) {
   const mine = listings.filter(l => l.cust === c.id);
-  const soldAll = mine.filter(l => l.status === "sold" && !isDropoff(l));
-  const itemsAll = mine.filter(isDropoff).flatMap(l => (l.items || []).filter(x => x.status === "sold").map(x => ({ ...x, lot: l })));
+  const inPeriod = x => !through || !x.soldDate || x.soldDate.slice(0, 10) <= through;
+  const held = k => !!(hold && hold.has(k));
+  const soldAll = mine.filter(l => !isDropoff(l) && (l.status === "sold" || (l.status === "pending" && l.price)) && inPeriod(l));
+  const itemsAll = mine.filter(isDropoff).flatMap(l => (l.items || []).filter(x => (x.status === "sold" || x.status === "awaiting") && inPeriod(x) && !isHouseRelist(x, l.items)).map(x => ({ ...x, lot: l })));
   // Sales with no PC % yet aren't counted until staff set one.
-  const sold = soldAll.filter(l => cardPayout(l, c) != null), dropItems = itemsAll.filter(x => itemPct(x, x.lot, c) != null);
-  const needPct = soldAll.length - sold.length + itemsAll.length - dropItems.length;
+  const soldPct = soldAll.filter(l => cardPayout(l, c) != null), itemsPct = itemsAll.filter(x => itemPct(x, x.lot, c) != null);
+  const needPct = soldAll.length - soldPct.length + itemsAll.length - itemsPct.length;
+  const lines = soldPct.map(l => ({ key: l.id, kind: "card", plat: l.plat, sku: l.sku, title: l.title, sold: l.soldDate || "", price: l.price || 0, fee: cardFee(l), amt: cardPayout(l, c), n: 1, awaiting: l.status === "pending" ? 1 : 0, held: held(l.id) }));
+  const byLot = new Map();
+  itemsPct.forEach(x => { const a = byLot.get(x.lot.id) || byLot.set(x.lot.id, []).get(x.lot.id); a.push(x); });
+  byLot.forEach((xs, id) => { const l = xs[0].lot, ds = xs.map(x => x.soldDate || "").filter(Boolean).sort();
+    lines.push({ key: id, kind: "drop", plat: l.plat || "pcs", sku: l.sku, title: `PC Sportscards drop-off${l.dropDate ? ` · ${fmtDay(l.dropDate)}` : ""}`, sold: ds[ds.length - 1] || "", from: ds[0] || "", price: xs.reduce((t, x) => t + (x.price || 0), 0), amt: xs.reduce((t, x) => t + itemShare(x, c, l), 0), n: xs.length, awaiting: xs.filter(x => x.status === "awaiting").length, held: held(id) }); });
+  lines.sort((a, b) => (a.plat === b.plat ? 0 : a.plat === "fan" ? -1 : b.plat === "fan" ? 1 : a.plat.localeCompare(b.plat)) || (a.sold || "").localeCompare(b.sold || ""));
+  const sold = soldPct.filter(l => !held(l.id)), dropItems = itemsPct.filter(x => !held(x.lot.id));
   // Sales reversed after the customer was paid: Wheelhouse absorbs them unless staff chose to deduct one.
   const deductions = mine.filter(isDropoff).flatMap(l => (l.items || []).filter(x => x.reversal?.deduct && !x.reversal.applied).map(x => ({ ...x, lot: l })));
   const deducted = deductions.reduce((s, x) => s + (x.reversal.amount || 0), 0);
-  return { cards: sold, dropItems, deductions, deducted, count: sold.length + dropItems.length, needPct,
-    amount: sold.reduce((s, l) => s + cardPayout(l, c), 0) + dropItems.reduce((s, x) => s + itemShare(x, c, x.lot), 0) + (c?.payable || 0) - deducted };
+  return { cards: sold, dropItems, deductions, deducted, lines, needPct, count: sold.length + dropItems.length,
+    awaiting: lines.filter(x => !x.held).reduce((t, x) => t + x.awaiting, 0),
+    amount: lines.filter(x => !x.held).reduce((t, x) => t + x.amt, 0) + (c?.payable || 0) - deducted };
 }
 
 export function detect(url) {
@@ -187,12 +228,12 @@ export function shrink(file, maxPx, quality) {
 /* ---------- card details ---------- */
 // A "lot" is one SKU standing for many cards, like a monthly PC Sportscards payout.
 export const isLot = l => !!(l && (l.kind === "dropoff" || l.lotCount > 1 || (l.items && l.items.length > 1) || /multi.?lot/i.test(l.title || "")));
-export function lotLine(l) {
+export function lotLine(l, staff = true) {
   const n = l.items?.length || l.lotCount || 0;
   if (isDropoff(l)) {
-    const sm = dropoffSummary(l.items);
-    const k = sm.cards;
-    return [l.dropDate ? `Dropped off ${fmtDay(l.dropDate)}` : "", k ? `${k} card${k === 1 ? "" : "s"}` : (l.expected ? `${l.expected} cards, not itemized yet` : ""), sm.sold + sm.paid ? `${sm.sold + sm.paid} sold` : "", sm.awaiting ? `${sm.awaiting} payment pending` : "", sm.live ? `${sm.live} listed` : ""].filter(Boolean).join(" · ");
+    const sm = dropoffSummary(staff ? l.items : custItems(l.items));
+    const k = sm.cards, nSold = sm.sold + sm.paid + (staff ? 0 : sm.awaiting);
+    return [l.dropDate ? `Dropped off ${fmtDay(l.dropDate)}` : "", k ? `${k} card${k === 1 ? "" : "s"}` : (l.expected ? `${l.expected} cards, not itemized yet` : ""), nSold ? `${nSold} sold` : "", staff && sm.awaiting ? `${sm.awaiting} payment pending` : "", sm.live ? `${sm.live} listed` : ""].filter(Boolean).join(" · ");
   }
   return [n ? `${n} card${n === 1 ? "" : "s"}` : "", l.period ? (l.plat === "pcs" ? `${l.period} payout` : l.period) : ""].filter(Boolean).join(" · ");
 }
@@ -242,8 +283,8 @@ export function cardDetailHtml(l, c, { staff = false, canAsk = false } = {}) {
     const ST = staff ? ITEM_STAT : CUST_ITEM_STAT;
     const head = `Cards in this drop-off (${sm.cards}${l.expected && l.expected !== sm.cards ? ` of ${l.expected} dropped off` : ""})`;
     lot = `<div style="display:grid;gap:8px"><h3>${head}</h3>` + (items.length
-      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${itemHistory(x, l.items)}${x.pcsId && staff ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}${staff && x.reversal ? `<div class="flag rev">Sale reversed after payout · ${money(x.reversal.amount)} ${x.reversal.applied ? `deducted ${fmtDay(x.reversal.applied)}` : x.reversal.deduct ? "will come off their next payout" : "absorbed by Wheelhouse"}</div>${x.reversal.applied ? "" : `<button class="btn ghost sm" type="button" data-rev="${i}">${x.reversal.deduct ? "Don’t deduct (Wheelhouse absorbs)" : "Deduct from next payout"}</button>`}` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status === "awaiting" ? "sold" : x.status === "cancelled" ? "unsold" : x.status}">${ST[x.status] || esc(x.status)}</span>${staff && x.status === "awaiting" ? '<div class="flag">Waiting on buyer payment</div>' : ""}${staff && x.status === "cancelled" ? `<div class="flag">${x.relistedAs ? `Relisted as PC #${esc(x.relistedAs)}` : "Watch for the relist"}</div>` : ""}${staff && x.relistOf ? `<div class="cert">Relist of PC #${esc(x.relistOf)}</div>` : ""}</td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price && (staff || x.status !== "cancelled") ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" ? shareText(itemShare(x, c, l), staff) : x.status === "awaiting" ? '<span class="muted">Pending</span>' : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold${sm.awaiting ? ` · ${sm.awaiting} pending` : ""}</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => x.status === "sold" || x.status === "paid").reduce((s, x) => s + itemShare(x, c), 0))}</td></tr></tbody></table></div>`
-      + (items.some(x => itemHistory(x, l.items)) ? `<div class="muted" style="font-size:13px">${RELIST_NOTE}</div>` : "")
+      ? `<div class="tbl-wrap"><table class="prev" style="min-width:560px"><thead><tr>${staff ? '<th><input type="checkbox" id="dx-all" aria-label="Select all cards in this drop-off"></th>' : ""}<th>Card</th><th>Status</th><th>Sold</th><th>Price</th><th>After fees</th><th>${staff ? "Consignor share" : "Your share"}</th></tr></thead><tbody>${items.map((x, i) => `<tr>${staff ? `<td><input type="checkbox" class="dx" data-i="${i}" aria-label="Select ${esc(x.title)}"></td>` : ""}<td class="title">${esc(x.title)}${itemHistory(x, l.items, staff)}${x.pcsId && staff ? `<div class="cert">PC #${esc(x.pcsId)}</div>` : ""}${staff && x.reversal ? `<div class="flag rev">Sale reversed after payout · ${money(x.reversal.amount)} ${x.reversal.applied ? `deducted ${fmtDay(x.reversal.applied)}` : x.reversal.deduct ? "will come off their next payout" : "absorbed by Wheelhouse"}</div>${x.reversal.applied ? "" : `<button class="btn ghost sm" type="button" data-rev="${i}">${x.reversal.deduct ? "Don’t deduct (Wheelhouse absorbs)" : "Deduct from next payout"}</button>`}` : ""}<a class="ebay-find" href="${ebayFind(x)}" target="_blank" rel="noopener">Find on eBay ↗</a></td><td><span class="st ${x.status === "live" ? "live" : x.status === "awaiting" ? "sold" : x.status === "cancelled" ? "unsold" : x.status}">${ST[x.status] || esc(x.status)}</span>${staff && x.status === "awaiting" ? '<div class="flag">Waiting on buyer payment</div>' : ""}${payNote(x) ? `<div class="cert">${esc(payNote(x))}</div>` : ""}${staff && x.status === "cancelled" ? `<div class="flag">${x.relistedAs ? `Relisted as PC #${esc(x.relistedAs)}` : "Watch for the relist"}</div>` : ""}${staff && x.relistOf ? `<div class="cert">Relist of PC #${esc(x.relistOf)}</div>` : ""}</td><td class="num">${x.soldDate ? fmtLong(x.soldDate) : ""}</td><td class="num">${x.price && (staff || x.status !== "cancelled") ? money(x.price) : ""}</td><td class="num">${x.net != null && (x.status === "sold" || x.status === "paid") ? money(x.net) : ""}</td><td class="num">${x.status === "sold" || x.status === "paid" || x.status === "awaiting" ? (staff && isHouseRelist(x, l.items) ? '<span class="muted">Wheelhouse (customer already paid)</span>' : shareText(itemShare(x, c, l), staff)) : ""}</td></tr>`).join("")}<tr class="grp">${staff ? "<td></td>" : ""}<td>Total</td><td>${sm.sold + sm.paid} sold${sm.awaiting ? ` · ${sm.awaiting} pending` : ""}</td><td></td><td class="num">${money(sm.gross)}</td><td class="num">${money(sm.net)}</td><td class="num">${money(items.filter(x => ["sold", "paid", "awaiting"].includes(x.status) && !isHouseRelist(x, l.items)).reduce((s, x) => s + itemShare(x, c, l), 0))}</td></tr></tbody></table></div>`
+      + (items.some(x => itemHistory(x, l.items, staff)) ? `<div class="muted" style="font-size:13px">${RELIST_NOTE}</div>` : "")
       : `<div class="empty" style="padding:16px">${staff ? "No cards in this drop-off yet. Select them in the PC Sportscards sorting list and add them here." : "We’re itemizing the cards from this drop-off. They’ll show up here once PC Sportscards lists them."}</div>`) + `</div>`;
   } else if (isLot(l)) {
     const items = l.items || [];
@@ -257,7 +298,7 @@ export function cardDetailHtml(l, c, { staff = false, canAsk = false } = {}) {
     : l.photo ? `<img class="card-photo" data-photo="${esc(l.photo.id)}" src="${l.photo.thumb}" alt="Photo of ${esc(l.title)}">` : "";
   return `<div style="display:grid;gap:14px">
     ${photo}
-    <div><div class="muted" style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">${isLot(l) ? esc(lotLine(l) || "Lot") : "Card details"}</div><h2 style="text-transform:none;letter-spacing:0;font-size:24px">${esc(l.title)}</h2></div>
+    <div><div class="muted" style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">${isLot(l) ? esc(lotLine(l, staff) || "Lot") : "Card details"}</div><h2 style="text-transform:none;letter-spacing:0;font-size:24px">${esc(l.title)}</h2></div>
     ${l.status === "awaitprice" && canAsk ? askFormHtml(l, staff || canAsk === "staff") : ""}
     <dl class="dl">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
     ${lot}
@@ -349,6 +390,7 @@ export function dashboardMarkup(pickerHtml = "") {
       <button type="button" data-t="live" aria-pressed="false">Live now</button>
       <button type="button" data-t="sold" aria-pressed="false">Sold</button>
       <button type="button" data-t="batches" aria-pressed="false">Batches</button>
+      <button type="button" data-t="payouts" aria-pressed="false">Payouts</button>
     </div>
     <select data-d="plat" style="width:auto" aria-label="Platform"><option value="">All auction houses</option>${Object.entries(PLAT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
   </div>
@@ -426,6 +468,21 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
     ].map(([k, v, s]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span>${s ? `<span class="s">${s}</span>` : ""}</div>`).join("");
 
     const fp = q("plat").value;
+    if (tab === "payouts") {
+      const ps = (c.payouts || []).slice().reverse();
+      const next = owedFor(c, mine);
+      const nextMonths = [...new Set(next.lines.map(x => monthKey(x.sold)).filter(Boolean))].sort();
+      q("cards").innerHTML = `<div class="notice"><b>How payouts work</b><span>We pay out once a month, around the 5th, for everything that sold the month before.${next.amount > 0.004 ? ` Your next payout${nextMonths.length ? ` (${nextMonths.map(k => monthLabel(k)).join(" and ")} sales)` : ""} is ${money(next.amount)} so far.` : ""}</span></div>`
+        + (ps.length ? ps.map(p => `<article class="card payout">
+          <div style="display:grid;gap:6px;min-width:0;flex:1">
+            <div class="t">${p.month ? `${esc(monthLabel(p.month, true))} payout` : "Payout"}</div>
+            <div class="meta"><span>Paid ${fmtDay(p.date)}</span>${p.cards ? `<span>${p.cards} card${p.cards === 1 ? "" : "s"}</span>` : ""}${p.method ? `<span>${esc(PAYM[p.method] || p.method)}</span>` : ""}</div>
+            ${p.lines?.length ? `<details><summary>See the cards</summary>${statementHtml(p.lines, { staff, deducted: p.deducted, carried: p.carried })}</details>` : ""}
+          </div>
+          <div class="right"><span class="sub">Paid</span><span class="amt recv">${money(p.amount)}</span></div>
+        </article>`).join("") : '<div class="empty">No payouts yet. Your first one comes around the 5th of the month after a card sells.</div>');
+      return;
+    }
     if (tab === "batches") {
       const bl = batches.filter(b => !fp || b.plat === fp).sort((a, b) => (b.recv || "").localeCompare(a.recv || ""));
       q("cards").innerHTML = bl.length ? bl.map(b => {
@@ -475,25 +532,28 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
       const tl = l.format === "auction" && l.status === "live" ? timeLeft(l.ends) : "";
       let label, sub, recv = null, sub2 = "", liveAuc = false;
       if (isDropoff(l)) {
-        const sm = dropoffSummary(l.items), soldIt = (l.items || []).filter(x => x.status === "sold" || x.status === "paid"), share = soldIt.some(x => itemPct(x, l, c) == null) ? null : soldIt.reduce((t, x) => t + itemShare(x, c, l), 0);
+        const its = staff ? l.items || [] : custItems(l.items), sm = dropoffSummary(its);
+        const soldIt = its.filter(x => ["sold", "paid", "awaiting"].includes(x.status) && !isHouseRelist(x, l.items)), share = soldIt.some(x => itemPct(x, l, c) == null) ? null : soldIt.reduce((t, x) => t + itemShare(x, c, l), 0);
+        if (!staff) { sm.sold += sm.awaiting; sm.gross = soldIt.reduce((t, x) => t + (x.price || 0), 0); sm.awaiting = 0; }
         label = sm.sold + sm.paid ? "Sold so far" : "PC Sportscards";
         if (staff && (sm.awaiting || sm.relisting)) sub2 = [sm.awaiting ? `${sm.awaiting} awaiting payment` : "", sm.relisting ? `${sm.relisting} to be relisted` : ""].filter(Boolean).join(" · ");
-        sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `${gets} ${share == null ? "pending" : money(share)}` : sm.awaiting ? `${sm.awaiting} sold, payment pending` : `${sm.live + sm.relisting} listed on eBay`;
+        sub = !l.items?.length ? "Being itemized" : sm.sold + sm.paid ? `${gets} ${share == null ? "pending" : money(share)}` : sm.awaiting ? `${sm.awaiting} sold` : `${sm.live + sm.relisting} listed on eBay`;
         if (sm.sold + sm.paid) recv = share ?? "pending";
         l = { ...l, price: sm.sold + sm.paid ? sm.gross : null };
       }
       else if (l.status === "live" && l.format !== "bin" && (!l.period || isAuctionNo(l.period))) { label = "Live in auction"; liveAuc = true; }
       else if (l.status === "live") { label = "Asking"; sub = l.plat === "store" ? "For sale in store at Wheelhouse" : "Buy It Now"; }
       else if (l.status === "awaitprice") { label = l.askPrice != null ? (staff ? "Customer asked" : "Your asking price") : staff ? "Awaiting price" : "Waiting on your price"; l = { ...l, price: l.askPrice ?? null }; sub = l.askPrice != null ? (staff ? "List it and set it Live" : "We’ll list it soon") : staff ? "Waiting on the customer" : ""; }
-      else if (l.status === "pending") { label = "Sale pending"; sub = "Waiting on the buyer’s payment"; }
+      else if (l.status === "pending" && staff) { label = "Sale pending"; sub = "Waiting on the buyer’s payment"; }
+      else if (l.status === "pending") { label = "Sold for"; recv = cardPayout(l, c) ?? "pending"; sub = payNote(l); }
       else if (l.status === "curating") { label = "Being curated"; sub = `${PLAT[l.plat]} is reviewing this card before listing it`; }
-      else if (isSold(l)) { label = "Sold for"; recv = cardPayout(l, c) ?? "pending"; sub = staff && l.payout == null && cardSplit(l, c) != null ? `${cardSplit(l, c)}% split` + (l.status === "paid" ? " · paid" : "") : l.status === "paid" ? "Paid out" : ""; }
+      else if (isSold(l)) { label = "Sold for"; recv = cardPayout(l, c) ?? "pending"; sub = staff && l.payout == null && cardSplit(l, c) != null ? `${cardSplit(l, c)}% split` + (l.status === "paid" ? " · paid" : "") : payNote(l); }
       else if (l.status === "returned") { label = "Returned to you"; sub = ""; }
       else { label = "Did not sell"; sub = "Ask us about relisting"; }
       return `<article class="card clickable" data-card="${esc(l.id)}" tabindex="0" aria-label="Details for ${esc(l.title)}">
         <div style="display:flex;gap:12px;align-items:flex-start;min-width:0">${l.photo ? `<button class="thumb" type="button" data-card="${esc(l.id)}" aria-label="Photo of ${esc(l.title)}"><img src="${l.photo.thumb}" alt=""></button>` : ""}<div style="display:grid;gap:6px;min-width:0">
           <div class="t">${esc(l.title)}</div>
-          <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}<span class="st ${l.status}">${STAT[l.status]}</span>${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
+          <div class="meta"><button class="linkbtn code" type="button" data-card="${esc(l.id)}" aria-label="Details for SKU ${esc(l.sku)}">SKU ${esc(l.sku)}</button>${isLot(l) ? `<span>${esc(lotLine(l, staff))}</span>` : ""}${l.batch ? `<span>Batch ${esc(l.batch)}</span>` : ""}<span class="chip ${l.plat}">${PLAT[l.plat]}</span>${gradeHtml(l, false)}${!staff && l.status === "pending" ? '<span class="st sold">Sold</span>' : `<span class="st ${l.status}">${STAT[l.status]}</span>`}${l.soldDate && l.status !== "live" ? `<span>${fmtDate(l.soldDate)}</span>` : ""}${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">View listing</a>` : ""}</div>
         </div></div>
         <div class="right">${liveAuc
           ? `<span class="sub">${label}</span><span class="amt" style="font-size:20px">${l.ends ? (auctionOver(l.ends) ? "Ended" : `Ends ${fmtEnd(l.ends)}`) : "Live now"}</span>${l.ends && auctionOver(l.ends) ? '<span class="sub">Results coming soon</span>' : ""}${bidLink(l) ? `<a class="bidlink" href="${esc(bidLink(l))}" target="_blank" rel="noopener">See current bid ↗</a>` : ""}`
