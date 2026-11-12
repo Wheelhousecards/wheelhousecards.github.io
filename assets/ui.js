@@ -203,14 +203,14 @@ export function soldCompsUrl(l) {
   const g = l.grade && !isRawGrade(l.grade) && !(l.title || "").toLowerCase().includes(String(l.grade).toLowerCase()) ? ` ${l.grade}` : "";
   return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(((l.title || "") + g).replace(/\s+/g, " ").trim())}&LH_Sold=1&LH_Complete=1&_sop=13`;
 }
-export function askFormHtml(l) {
+export function askFormHtml(l, staff = false) {
   return `<form class="askbox" data-askform="${esc(l.id)}">
-    <h3 style="margin:0">${l.askPrice != null ? "Change your asking price" : "Set your asking price"}</h3>
-    <p class="muted" style="margin:0">This card will go up as a Buy It Now on ${PLAT[l.plat] || "the site"}. Tell us what you’d like to ask for it and we’ll list it.</p>
+    <h3 style="margin:0">${staff ? (l.askPrice != null ? "Change the customer’s asking price" : "Enter the customer’s asking price") : l.askPrice != null ? "Change your asking price" : "Set your asking price"}</h3>
+    <p class="muted" style="margin:0">${staff ? "Customers see this box and fill it in themselves. If they gave you a price by phone, text or in the store, enter it here." : `This card will go up as a Buy It Now on ${PLAT[l.plat] || "the site"}. Tell us what you’d like to ask for it and we’ll list it.`}</p>
     <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
       <div class="f" style="flex:0 0 160px"><label for="ask-price">Asking price ($)</label><input id="ask-price" type="number" step="0.01" min="1" required inputmode="decimal" value="${l.askPrice ?? ""}" placeholder="e.g. 250"></div>
       <div class="f" style="flex:1 1 220px"><label for="ask-note">Anything else? (optional)</label><input id="ask-note" maxlength="400" value="${esc(l.askNote || "")}" placeholder="e.g. open to offers above $200"></div>
-      <button class="btn" type="submit">${l.askPrice != null ? "Update my price" : "Send my price"}</button>
+      <button class="btn" type="submit">${staff ? "Save price" : l.askPrice != null ? "Update my price" : "Send my price"}</button>
     </div>
     <a href="${soldCompsUrl(l)}" target="_blank" rel="noopener">See what this card has sold for on eBay ↗</a>
     <div class="muted" data-askmsg role="status"></div>
@@ -257,7 +257,7 @@ export function cardDetailHtml(l, c, { staff = false, canAsk = false } = {}) {
   return `<div style="display:grid;gap:14px">
     ${photo}
     <div><div class="muted" style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">${isLot(l) ? esc(lotLine(l) || "Lot") : "Card details"}</div><h2 style="text-transform:none;letter-spacing:0;font-size:24px">${esc(l.title)}</h2></div>
-    ${l.status === "awaitprice" && canAsk ? askFormHtml(l) : ""}
+    ${l.status === "awaitprice" && canAsk ? askFormHtml(l, staff || canAsk === "staff") : ""}
     <dl class="dl">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
     ${lot}
   </div>`;
@@ -374,7 +374,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
   const modal = createModal();
   const openCard = id => {
     const l = data?.listings.find(x => x.id === id); if (!l) return;
-    modal.open(cardDetailHtml(l, data.customer, { canAsk: !!askPrice && !staff })); loadFullPhoto(modal.body, loadPhoto);
+    modal.open(cardDetailHtml(l, data.customer, { canAsk: askPrice ? (staff ? "staff" : true) : false })); loadFullPhoto(modal.body, loadPhoto);
     return l;
   };
   const openAsk = id => { const l = openCard(id); if (l) modal.body.querySelector("#ask-price")?.focus(); };
@@ -387,7 +387,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
       await askPrice(f.dataset.askform, price, note);
       const l = data.listings.find(x => x.id === f.dataset.askform); if (l) Object.assign(l, { askPrice: price, askNote: note, askAt: new Date().toISOString() });
       render(); openCard(f.dataset.askform);
-      const m2 = modal.body.querySelector("[data-askmsg]"); if (m2) m2.textContent = "Thanks — we got your price and will list it soon.";
+      const m2 = modal.body.querySelector("[data-askmsg]"); if (m2) m2.textContent = staff ? "Saved. It’s in the asking-price alert on the staff page." : "Thanks — we got your price and will list it soon.";
     } catch (err) { f.querySelector("button").disabled = false; msg.innerHTML = `We couldn’t send that just now. Email your price to <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> and we’ll take care of it.`; }
   });
   root.addEventListener("keydown", e => {
@@ -495,7 +495,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
           ? `<span class="sub">${label}</span><span class="amt" style="font-size:20px">${l.ends ? (auctionOver(l.ends) ? "Ended" : `Ends ${fmtEnd(l.ends)}`) : "Live now"}</span>${l.ends && auctionOver(l.ends) ? '<span class="sub">Results coming soon</span>' : ""}${bidLink(l) ? `<a class="bidlink" href="${esc(bidLink(l))}" target="_blank" rel="noopener">See current bid ↗</a>` : ""}`
           : recv != null
           ? `<span class="sub">${gets}</span><span class="amt recv">${recv === "pending" ? (staff ? '<span class="need" style="font-size:16px">Set PC %</span>' : '<span class="muted" style="font-size:16px">Pending</span>') : money(recv)}</span><span class="soldfor">${isDropoff(l) ? "Sold so far" : "Sold for"} ${money(l.price)}</span>`
-          : `<span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>`}${liveAuc ? "" : `<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>`}${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}${l.status === "awaitprice" && !staff ? `<button class="btn sm" type="button" data-ask="${esc(l.id)}">${l.askPrice != null ? "Change my price" : "Set your price"}</button>` : ""}</div>
+          : `<span class="sub">${label}</span><span class="amt">${(isDropoff(l) && l.price == null) || l.status === "unsold" || l.status === "returned" || (l.status === "curating" && l.price == null) ? "—" : money(l.price)}</span>`}${liveAuc ? "" : `<span class="sub">${recv != null && isDropoff(l) ? "" : sub}</span>`}${sub2 ? `<span class="flag">${esc(sub2)}</span>` : ""}${l.status === "awaitprice" ? `<button class="btn sm" type="button" data-ask="${esc(l.id)}">${staff ? (l.askPrice != null ? "Change price" : "Enter price") : l.askPrice != null ? "Change my price" : "Set your price"}</button>` : ""}</div>
       </article>`;
     };
     const platOrder = ["fan", "pcs", "store", "goldin", "shibe", "other"];

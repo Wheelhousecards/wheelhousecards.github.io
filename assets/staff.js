@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261111191226";
+import { db, logout } from "./firebase.js?v=20261112110320";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261111191226";
-import { setupGate, gateMarkup } from "./gate.js?v=20261111191226";
-import { emailSend, contact } from "./firebase-config.js?v=20261111191226";
+} from "./ui.js?v=20261112110320";
+import { setupGate, gateMarkup } from "./gate.js?v=20261112110320";
+import { emailSend, contact } from "./firebase-config.js?v=20261112110320";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -165,7 +165,9 @@ function listen() {
 
 /* ---------- shell ---------- */
 const loadPhoto = async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; };
-const dash = mountDashboard($("#cust"), `<div class="sel" style="display:grid;gap:4px;width:min(280px,100%)"><label for="cv-pick">Preview as consignor</label><select id="cv-pick"></select></div>`, { loadPhoto, staff: true });
+const dash = mountDashboard($("#cust"), `<div class="sel" style="display:grid;gap:4px;width:min(280px,100%)"><label for="cv-pick">Preview as consignor</label><select id="cv-pick"></select></div>`, { loadPhoto, staff: true,
+  // Staff can enter a price the customer gave them another way (phone, text, in store).
+  askPrice: (id, price, note) => updateDoc(listingRef(id), { askPrice: price, askNote: note, askAt: serverTimestamp(), askBy: me || "", updatedAt: serverTimestamp() }) });
 $("#cv-pick").addEventListener("change", e => { ui.cv = e.target.value; try { history.replaceState({ v: "cust", cv: ui.cv }, "", "#customer"); } catch (err) {} render(); });
 // Opening a customer page adds a browser history entry, so the browser's back button
 // (and the "Back to staff" button) returns to the staff app where you left off.
