@@ -250,3 +250,4 @@ article.card.clickable:focus-visible{outline:2px solid var(--accent,#2d5bd7);out
 #ask-alert{display:grid;gap:8px;margin-bottom:14px;padding:12px 14px;border-radius:8px}
 #ask-alert[hidden]{display:none}
 .ask-list{margin:0;padding-left:18px;display:grid;gap:3px;font-size:14px}
+.askbox{display:grid;gap:10px;padding:14px;border:1px solid #f0b35c;border-left:4px solid #c97a12;border-radius:8px;background:#fff8ec}
