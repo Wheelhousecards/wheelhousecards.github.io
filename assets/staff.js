@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261112132622";
+import { db, logout } from "./firebase.js?v=20261112145004";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText
-} from "./ui.js?v=20261112132622";
-import { setupGate, gateMarkup } from "./gate.js?v=20261112132622";
-import { emailSend, contact } from "./firebase-config.js?v=20261112132622";
+} from "./ui.js?v=20261112145004";
+import { setupGate, gateMarkup } from "./gate.js?v=20261112145004";
+import { emailSend, contact } from "./firebase-config.js?v=20261112145004";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1002,7 +1002,7 @@ $("#psn-form").addEventListener("submit", async e => {
 });
 
 /* ---------- payouts ---------- */
-const SITE = "https://wheelhousecards.github.io";
+const SITE = "https://wheelhousecards.github.io/consignment";
 let paidArm = "";
 function payoutEmail(c, o) {
   const first = (c.name || "").split(/\s+/)[0] || "there";
@@ -1028,7 +1028,7 @@ function openMail(c, o, m, { title = "Payout email", photo = null, onSent = null
     <div class="f"><label>To</label><div class="code">${esc(c.email)}</div></div>
     <div class="f"><label for="pm-subj">Subject</label><input id="pm-subj" value="${esc(m.subject)}"></div>
     <div class="f"><label for="pm-body">Message</label><textarea id="pm-body" rows="14" style="font:inherit;padding:10px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box">${esc(m.body)}</textarea></div>
-    ${photo ? `<div class="f"><label>Attached photo</label><img src="${photo}" alt="Receipt photo" style="max-width:240px;border-radius:6px;border:1px solid #ddd"></div>` : ""}
+    ${photo ? `<div class="f"><label>${emailSend.attachments ? "Attached photo" : "Drop-off photo (not attached)"}</label><img src="${photo}" alt="Receipt photo" style="max-width:240px;border-radius:6px;border:1px solid #ddd">${emailSend.attachments ? "" : '<span class="muted" style="font-size:13px">Photo attachments need a paid EmailJS plan, so this email goes without it. The customer can see their drop-off photos in their portal.</span>'}</div>` : ""}
     ${canSend() ? "" : '<div class="notice"><b>Sending from the app isn’t set up yet.</b><span>Until it is, “Open in email app” hands this message to your email program.</span></div>'}
     <div class="row">${canSend() ? '<button class="btn" type="button" id="pm-send">Approve and send</button>' : '<button class="btn" type="button" id="pm-open">Open in email app</button>'}<button class="btn ghost" type="button" id="pm-cancel">Cancel</button><span class="detect" id="pm-msg" role="status"></span></div>
   </div>`);
@@ -1045,7 +1045,7 @@ function openMail(c, o, m, { title = "Payout email", photo = null, onSent = null
     try {
       const r = await fetch("https://api.emailjs.com/api/v1.0/email/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         service_id: emailSend.serviceId, template_id: emailSend.templateId, user_id: emailSend.publicKey,
-        template_params: { to_email: c.email, to_name: c.name, subject: val("#pm-subj"), message: val("#pm-body"), reply_to: contact.email, bcc: contact.email, photo: photo || "" } }) });
+        template_params: { to_email: c.email, to_name: c.name, subject: val("#pm-subj"), message: val("#pm-body"), reply_to: contact.email, bcc: contact.email, ...(emailSend.attachments ? { photo: photo || "" } : {}) } }) });
       if (!r.ok) throw new Error(await r.text());
       mailBox.close(); await guarded($(out), logged); $(out).textContent = `Sent the email to ${c.name} (${c.email}).`;
     } catch (err) { console.error(err); btn.disabled = false; say("Couldn’t send it. Check your connection and try again, or use Copy message."); }
@@ -1076,7 +1076,7 @@ async function openReceipt(b) {
   const photo = await receiptPhoto(b);
   const body = [`Hi ${first},`, "",
     `Thanks for consigning with Wheelhouse. This is your receipt: we received ${b.cards ? `${b.cards} card${b.cards === 1 ? "" : "s"}` : "your cards"} from you on ${fmtDay(b.recv)} (batch ${b.id}), to be sold through ${PLAT[b.plat] || "our auction partners"}.`, "",
-    photo ? "A photo of the cards you dropped off is attached for both of our records." : "", photo ? "" : null,
+    photo && emailSend.attachments ? "A photo of the cards you dropped off is attached for both of our records." : null, photo && emailSend.attachments ? "" : null,
     `Curating and listing can take a little while. You can follow your cards anytime at ${SITE}. Sign in (or create an account) with this email address.`, "",
     "Thanks,", "Wheelhouse"].filter(x => x !== null).join("\n");
   openMail(c, null, { subject: `Wheelhouse consignment receipt: batch ${b.id}`, body }, {
@@ -2196,7 +2196,7 @@ $("#i-go").addEventListener("click", async () => {
     if (!done) { $("#i-go").disabled = false; return; }
     closeImport();
     const noEmail = fresh.filter(p => !p.data.email).length;
-    $("#i-msg").textContent = `Added ${fresh.length} consignor${fresh.length === 1 ? "" : "s"}. To see their cards, each one goes to wheelhousecards.github.io, chooses “Create account”, and uses the email you have on file for them.` + (noEmail ? ` ${noEmail} have no email yet. Add one with Edit in the Consignors list before they can sign in.` : "");
+    $("#i-msg").textContent = `Added ${fresh.length} consignor${fresh.length === 1 ? "" : "s"}. To see their cards, each one goes to wheelhousecards.github.io/consignment, chooses “Create account”, and uses the email you have on file for them.` + (noEmail ? ` ${noEmail} have no email yet. Add one with Edit in the Consignors list before they can sign in.` : "");
     return;
   }
   await loadHistory();

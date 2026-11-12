@@ -18,8 +18,10 @@ export const contact = {
 
 // Sending payout emails straight from the staff app (EmailJS, free up to 200 emails a month).
 // Leave these blank and the app falls back to opening your email app.
+// Connected to consignment@wheelhousecards.com (Gmail) on Nov 12, 2026.
 export const emailSend = {
-  serviceId: "",
-  templateId: "",
-  publicKey: ""
+  serviceId: "service_9bpg5b6",
+  templateId: "template_xtk5795",
+  publicKey: "9KPUOZJi6N-vQ5Nk0",
+  attachments: false // photo attachments need a paid EmailJS plan; set true after upgrading and adding a "photo" variable attachment to the template
 };

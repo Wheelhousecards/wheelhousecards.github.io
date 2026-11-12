@@ -1,9 +1,9 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261112132622";
+import { db, logout } from "./firebase.js?v=20261112145004";
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261112132622";
-import { setupGate, gateMarkup } from "./gate.js?v=20261112132622";
-import { contact } from "./firebase-config.js?v=20261112132622";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261112145004";
+import { setupGate, gateMarkup } from "./gate.js?v=20261112145004";
+import { contact, emailSend } from "./firebase-config.js?v=20261112145004";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
@@ -15,8 +15,23 @@ let unsubs = [], state = { customer: null, listings: [], batches: [] }, me = "";
 const dash = mountDashboard($("#dash"), "", {
   loadPhoto: async id => { const d = await getDoc(doc(db, "photos", id)); return d.exists() ? d.data().data : null; },
   // Customers can only set their asking price on a card that is Awaiting price (see firestore.rules).
-  askPrice: (id, price, min) => updateDoc(doc(db, "listings", id), { askPrice: price, askMin: min, askAt: serverTimestamp() }),
+  askPrice: async (id, price, min) => {
+    await updateDoc(doc(db, "listings", id), { askPrice: price, askMin: min, askAt: serverTimestamp() });
+    notifyStaff(state.listings.find(l => l.id === id), state.customer, price, min);
+  },
 });
+// Email consignment@ when a customer sends an asking price. Best effort: the price is already saved, so a failed email never bothers the customer.
+const money2 = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+function notifyStaff(l, c, price, min) {
+  if (!emailSend.serviceId || !emailSend.templateId || !emailSend.publicKey || !contact.email) return;
+  const who = c ? `${c.name} (${c.code})` : me;
+  const message = [`${who} sent an asking price for a Buy It Now card.`, "",
+    `Card: ${l?.title || ""}`, `SKU: ${l?.sku || ""}`, `Asking price: ${money2(price)}`, `Minimum offer: ${min != null ? money2(min) : "No offers"}`, "",
+    "List it on Fanatics at that price, then set it to Live in the staff app:", "https://wheelhousecards.github.io/consignment/staff"].join("\n");
+  fetch("https://api.emailjs.com/api/v1.0/email/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+    service_id: emailSend.serviceId, template_id: emailSend.templateId, user_id: emailSend.publicKey,
+    template_params: { to_email: contact.email, to_name: "Wheelhouse Consignment", subject: `Asking price: SKU ${l?.sku || ""} · ${c?.name || me} · ${money2(price)}`, message, reply_to: c?.email || me, bcc: "" } }) }).catch(() => {});
+}
 createLightbox(
   id => {
     if (id.startsWith("L:")) { const l = state.listings.find(x => x.id === id.slice(2)); return l && { id: l.id, label: l.title, photos: l.photos || [] }; }
