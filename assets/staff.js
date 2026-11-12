@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261111172424";
+import { db, logout } from "./firebase.js?v=20261111190018";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,9 +9,9 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf
-} from "./ui.js?v=20261111172424";
-import { setupGate, gateMarkup } from "./gate.js?v=20261111172424";
-import { emailSend, contact } from "./firebase-config.js?v=20261111172424";
+} from "./ui.js?v=20261111190018";
+import { setupGate, gateMarkup } from "./gate.js?v=20261111190018";
+import { emailSend, contact } from "./firebase-config.js?v=20261111190018";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -1226,7 +1226,8 @@ function renderBulk() {
   const n = ui.sel.size; $("#bulkbar").hidden = !n;
   if (n) {
     $("#bb-n").textContent = `${n} selected`;
-    $("#bb-cust").innerHTML = S.customers.length ? custOptions($("#bb-cust").value) : '<option value="">Add a consignor first</option>';
+    // No default consignor: Assign does nothing until someone is picked, so a stray click can't move cards to whoever is first alphabetically.
+    $("#bb-cust").innerHTML = S.customers.length ? '<option value="">Move to consignor…</option>' + custOptions($("#bb-cust").value) : '<option value="">Add a consignor first</option>';
     $("#bb-batch").innerHTML = S.batches.length ? batchOptions($("#bb-batch").value, "") + '<option value="__out">Take out of batch</option>' : '<option value="">No batches yet</option>';
     if (!delArm) $("#bb-del").textContent = "Remove";
     if (!purgeArm) $("#bb-purge").textContent = "Delete for good";
@@ -1250,10 +1251,10 @@ $("#needs").addEventListener("click", e => {
   ui.sel = new Set(S.listings.filter(l => !custById(l.cust)).map(l => l.id)); renderLedger();
 });
 $("#bb-cust-go").addEventListener("click", e => bulk(e.target, async () => {
-  const c = custById($("#bb-cust").value); if (!c) return;
+  const c = custById($("#bb-cust").value); if (!c) { lmsg("Pick the consignor to move these cards to first."); $("#bb-cust").focus(); return; }
   const ls = selected();
   await commit(ls.map(l => upd(l.id, { cust: c.id, custEmail: c.email })));
-  ui.sel.clear(); lmsg(`Assigned ${plural(ls.length)} to ${c.name}. They now show on ${c.name.split(" ")[0]}’s page.`);
+  ui.sel.clear(); $("#bb-cust").value = ""; lmsg(`Assigned ${plural(ls.length)} to ${c.name}. They now show on ${c.name.split(" ")[0]}’s page.`);
 }));
 $("#bb-st-go").addEventListener("click", e => bulk(e.target, async () => {
   const s = $("#bb-st").value, ls = selected();
