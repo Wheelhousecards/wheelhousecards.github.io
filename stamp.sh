@@ -8,3 +8,6 @@ echo "stamped $v"
 # Customer link with "consignment" in it: wheelhousecards.github.io/consignment serves the same portal.
 mkdir -p consignment
 sed 's#<head>#<head>\n<base href="/">#' index.html > consignment/index.html
+# Staff link: wheelhousecards.github.io/consignment/staff serves the staff app.
+mkdir -p consignment/staff
+sed 's#<head>#<head>\n<base href="/">#' staff.html > consignment/staff/index.html
