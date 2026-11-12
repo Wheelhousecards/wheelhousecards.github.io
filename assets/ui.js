@@ -391,7 +391,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
       await askPrice(f.dataset.askform, price, min);
       const l = data.listings.find(x => x.id === f.dataset.askform); if (l) Object.assign(l, { askPrice: price, askMin: min, askAt: new Date().toISOString() });
       render(); openCard(f.dataset.askform);
-      const m2 = modal.body.querySelector("[data-askmsg]"); if (m2) m2.textContent = staff ? "Saved. It’s in the asking-price alert on the staff page." : "Thanks — we got your price and will list it soon.";
+      const m2 = modal.body.querySelector("[data-askmsg]"); if (m2) m2.textContent = "Saved.";
     } catch (err) { f.querySelector("button").disabled = false; msg.innerHTML = `We couldn’t send that just now. Email your price to <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> and we’ll take care of it.`; }
   });
   root.addEventListener("keydown", e => {
