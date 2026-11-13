@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261113172324";
+import { db, logout } from "./firebase.js?v=20261113183413";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -9,10 +9,10 @@ import {
   fmtDay, today, thumbsHtml, shrink, createLightbox, mountDashboard, PAYM, payLine, owedFor,
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
-  statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey
-} from "./ui.js?v=20261113172324";
-import { setupGate, gateMarkup } from "./gate.js?v=20261113172324";
-import { emailSend, contact } from "./firebase-config.js?v=20261113172324";
+  statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
+} from "./ui.js?v=20261113183413";
+import { setupGate, gateMarkup } from "./gate.js?v=20261113183413";
+import { emailSend, contact } from "./firebase-config.js?v=20261113183413";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -330,11 +330,47 @@ $("#ask-alert").addEventListener("click", async e => {
   const ok = await guarded($("#ledger-msg"), async () => { await commit([upd(l.id, { price: l.askPrice, format: "bin", status: "live" })]); return true; });
   if (ok) lmsg(`SKU ${l.sku} is Live as a Buy It Now at ${money(l.askPrice)}.${l.url ? "" : " Paste its Fanatics link in the Link column when you have it."}`); else e.target.disabled = false;
 });
+// Bell in the header: everything that needs staff attention, worked out live from the data (nothing to dismiss; items clear when they're done).
+function bellItems() {
+  const out = [], today = new Date().toISOString().slice(0, 10);
+  const asks = S.all.filter(l => l.status === "awaitprice" && l.askPrice != null);
+  if (asks.length) out.push({ n: asks.length, title: `${asks.length === 1 ? "A customer" : `${asks.length} customers`} sent an asking price`, list: asks.map(l => ({ id: l.id, text: `${l.sku} · ${custById(l.cust)?.name || ""} · ${money(l.askPrice)}` })), go: "ledger", goText: "List them" });
+  const ended = S.all.filter(l => l.plat === "fan" && l.status === "live" && l.format !== "bin" && l.ends && auctionOver(l.ends));
+  if (ended.length) out.push({ n: ended.length, title: `${ended.length} Fanatics auction${ended.length === 1 ? "" : "s"} ended`, sub: "Mark each one sold (with the price) or unsold.", list: ended.slice(0, 8).map(l => ({ id: l.id, text: `${l.sku} · ${custById(l.cust)?.name || ""} · ended ${fmtDay(String(l.ends).slice(0, 10))}` })), more: ended.length - 8 });
+  const revs = S.all.filter(isDropoff).flatMap(l => (l.items || []).filter(x => x.reversal && !x.reversal.applied && x.reversal.date && (Date.parse(today) - Date.parse(x.reversal.date)) / 864e5 <= 14).map(x => ({ l, x })));
+  if (revs.length) out.push({ n: revs.length, title: `${revs.length} sale${revs.length === 1 ? "" : "s"} reversed after payout`, sub: "Absorbed by Wheelhouse unless you choose to deduct it.", list: revs.map(({ l, x }) => ({ id: l.id, text: `${l.sku} · ${custById(l.cust)?.name || ""} · ${x.title.slice(0, 40)} · ${money(x.reversal.amount)}` })) });
+  const unsorted = (S.pool || []).filter(r => !r.hidden).length;
+  if (unsorted) out.push({ n: 1, title: `${unsorted.toLocaleString()} PC Sportscards card${unsorted === 1 ? "" : "s"} to sort`, sub: "Assign them to each customer’s drop-off SKU.", go: "pcsort", goText: "Sort them" });
+  if (new Date().getDate() <= 10) {
+    const M = lastMonthKey(), due = S.customers.filter(c => !isHouse(c)).map(c => owedFor(c, S.active, { through: monthEnd(M) })).filter(o => o.amount > 0.004);
+    if (due.length) out.push({ n: 1, title: `${monthLabel(M)} payouts are due`, sub: `${due.length} consignor${due.length === 1 ? "" : "s"} · ${money(due.reduce((t, o) => t + o.amount, 0))} · pay around the 5th.`, go: "payouts", goText: "Open Payouts" });
+  }
+  return out;
+}
+function renderBell() {
+  const items = bellItems(), n = items.reduce((t, x) => t + x.n, 0);
+  $("#bell").hidden = false;
+  $("#bell-n").hidden = !n; $("#bell-n").textContent = n > 99 ? "99+" : n;
+  $("#bell").setAttribute("aria-label", n ? `Notifications: ${n} need attention` : "Notifications: all caught up");
+  $("#bell-panel").innerHTML = `<div class="bell-h">Needs your attention</div>` + (items.length ? items.map(it => `<div class="bell-item">
+      <div class="bell-t">${esc(it.title)}</div>${it.sub ? `<div class="muted" style="font-size:12px">${esc(it.sub)}</div>` : ""}
+      ${it.list ? `<ul>${it.list.map(x => `<li><button class="linkbtn" type="button" data-open="${x.id}">${esc(x.text)}</button></li>`).join("")}${it.more > 0 ? `<li class="muted">and ${it.more} more</li>` : ""}</ul>` : ""}
+      ${it.go ? `<button class="btn ghost sm" type="button" data-bell-go="${it.go}">${esc(it.goText)}</button>` : ""}</div>`).join("") : '<div class="muted" style="padding:10px 0">All caught up.</div>');
+}
+const bellClose = () => { $("#bell-panel").hidden = true; $("#bell").setAttribute("aria-expanded", "false"); };
+$("#bell").addEventListener("click", e => { e.stopPropagation(); const open = $("#bell-panel").hidden; $("#bell-panel").hidden = !open; $("#bell").setAttribute("aria-expanded", String(open)); });
+$("#bell-panel").addEventListener("click", e => {
+  const go = e.target.dataset.bellGo; if (go) { bellClose(); if (ui.mode !== "staff") $("#m-staff")?.click(); $("#" + go)?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  if (e.target.closest("[data-open]")) bellClose();
+});
+document.addEventListener("click", e => { if (!$("#bell-panel").hidden && !e.target.closest(".bellwrap")) bellClose(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#bell-panel").hidden) { bellClose(); $("#bell").focus(); } });
+
 // "Clear filters" shows whenever the card list is filtered, so it's always one click back to every card.
 const LEDGER_FILTERS = ["#f-q", "#f-cust", "#f-plat", "#f-st", "#f-batch", "#f-added"];
 $("#f-clear").addEventListener("click", () => { LEDGER_FILTERS.forEach(x => { $(x).value = ""; }); document.querySelectorAll(".filters .csearch").forEach(b => { b.value = ""; }); renderLedger(); });
 function renderLedger() {
-  renderAskAlert();
+  renderAskAlert(); renderBell();
   $("#f-clear").hidden = !LEDGER_FILTERS.some(x => $(x).value);
   const tb = $("#tbody");
   if (tb.contains(document.activeElement) && document.activeElement.tagName !== "BUTTON" && document.activeElement.type !== "checkbox") { tb.dataset.stale = "1"; return; }
@@ -939,6 +975,7 @@ function renderSort() {
   for (const id of psSel) if (!rows.some(r => r.pcsId === id)) psSel.delete(id);
   const unsorted = rows.filter(r => !r.hidden).length;
   $("#ps-count").textContent = unsorted ? `${unsorted.toLocaleString()} unsorted` : "";
+  renderBell();
   $("#pcsort").hidden = !rows.length && !dropoffCount();
   $("#ps-body").innerHTML = shown.length ? shown.slice(0, 600).map(r => `<tr${psSel.has(r.pcsId) ? ' class="on"' : ""}><td><input type="checkbox" class="pss" data-id="${esc(r.pcsId)}"${psSel.has(r.pcsId) ? " checked" : ""} aria-label="Select ${esc(r.title)}"></td><td class="title">${esc(r.title)}<div class="cert">PC #${esc(r.pcsId)}</div></td><td><span class="st ${r.status}">${ITEM_STAT[r.status]}</span></td><td class="num">${r.listed ? fmtDay(r.listed.slice(0, 10)) : ""}</td><td class="num">${r.status === "sold" ? `${money(r.price)}<div class="cert">${money(r.net)} after fees</div>` : ""}</td></tr>`).join("") + (shown.length > 600 ? `<tr><td colspan="5" class="muted">Showing 600 of ${shown.length}. Filter by listing date to narrow it down.</td></tr>` : "")
     : `<tr><td colspan="5"><div class="empty">${rows.length ? "No cards match these filters." : "Nothing to sort. Import the PC Sportscards export to bring in new cards."}</div></td></tr>`;

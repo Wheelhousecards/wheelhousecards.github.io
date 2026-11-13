@@ -257,3 +257,17 @@ article.card.clickable:focus-visible{outline:2px solid var(--accent,#2d5bd7);out
 tr.stmt-row > td{background:var(--soft,#f6f7f9);padding:10px 12px}
 article.card.payout details summary{cursor:pointer;color:var(--accent,#2d5bd7);font-size:14px}
 article.card.payout details[open] summary{margin-bottom:8px}
+.bellwrap{position:relative;display:inline-flex}
+.bell{position:relative;display:inline-grid;place-items:center;width:36px;height:36px;border-radius:50%;border:1px solid var(--line,#ddd);background:#fff;color:var(--ink,#111);cursor:pointer}
+.bell:hover{background:#f3f4f6}
+.bell[hidden]{display:none}
+.bell .badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#d92d20;color:#fff;font:700 11px/18px var(--body,system-ui);text-align:center;box-shadow:0 0 0 2px #fff}
+.bell .badge[hidden]{display:none}
+.bell-panel{position:absolute;right:0;top:44px;z-index:50;width:min(380px,calc(100vw - 32px));max-height:70vh;overflow:auto;background:#fff;color:var(--ink,#111);border:1px solid var(--line,#ddd);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:10px 14px;text-align:left}
+.bell-panel[hidden]{display:none}
+.bell-h{font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;padding:4px 0 8px;border-bottom:1px solid var(--line,#eee)}
+.bell-item{display:grid;gap:6px;padding:10px 0;border-bottom:1px solid var(--line,#eee)}
+.bell-item:last-child{border-bottom:0}
+.bell-t{font-weight:600}
+.bell-item ul{margin:0;padding-left:16px;display:grid;gap:2px;font-size:13px}
+.bell-item .btn{justify-self:start}
