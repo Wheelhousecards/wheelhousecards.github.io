@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261113113649";
+import { db, logout } from "./firebase.js?v=20261113154908";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey
-} from "./ui.js?v=20261113113649";
-import { setupGate, gateMarkup } from "./gate.js?v=20261113113649";
-import { emailSend, contact } from "./firebase-config.js?v=20261113113649";
+} from "./ui.js?v=20261113154908";
+import { setupGate, gateMarkup } from "./gate.js?v=20261113154908";
+import { emailSend, contact } from "./firebase-config.js?v=20261113154908";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -604,7 +604,9 @@ function openDetail(id) {
 }
 function openDropDetail(l) {
   const c = custById(l.cust), v = x => esc(x ?? "");
-  detail.open(cardDetailHtml(l, c, { staff: true }) + `
+  const bt = l.batch ? batchById(l.batch) : null, sentAt = bt?.receiptAt || l.receiptAt;
+  const mailBar = c?.email ? `<div class="row" style="gap:8px;margin-bottom:10px"><button class="btn sm" type="button" id="dx-receipt">${sentAt ? "Resend receipt email" : "Email receipt to customer"}</button><span class="muted" style="font-size:13px">${sentAt ? `Receipt sent ${fmtDay(String(sentAt).slice(0, 10))}` : "Lets them know we have their cards and where to follow them"}</span></div>` : "";
+  detail.open(mailBar + cardDetailHtml(l, c, { staff: true }) + `
     <div class="row">${(l.items || []).length ? `<button class="btn ghost sm" type="button" id="dx-back">Move selected cards back to the sorting list</button>` : ""}<span class="detect" id="dx-msg" role="status"></span></div>
     <div style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:14px">
       <h3>Drop-off photos</h3>
@@ -852,6 +854,12 @@ detail.body.addEventListener("change", async e => {
 });
 detail.body.addEventListener("click", async e => {
   if (e.target.id === "dx-all") return;
+  if (e.target.id === "dx-receipt") {
+    const l = S.all.find(x => x.id === openCard); if (!l) return;
+    e.target.disabled = true;
+    try { const bt = l.batch ? batchById(l.batch) : null; await openReceipt(bt, { lot: l }); } finally { e.target.disabled = false; }
+    return;
+  }
   if (e.target.dataset.rev != null) {
     const l = S.all.find(x => x.id === openCard); if (!l) return;
     const i = +e.target.dataset.rev, x = l.items[i]; if (!x?.reversal || x.reversal.applied) return;
@@ -1106,20 +1114,22 @@ async function receiptPhoto(b) {
   } catch (e) {}
   return p.thumb;
 }
-async function openReceipt(b) {
+// Receipt for a batch, or for a drop-off with no batch (pass { lot }).
+async function openReceipt(b, { lot = null } = {}) {
+  if (lot && !b) b = { id: "", cust: lot.cust, cards: (lot.items || []).length || lot.expected || 0, recv: lot.dropDate || (lot.added || "").slice(0, 10), plat: lot.plat || "pcs", photos: lot.photos || [] };
   const c = custById(b.cust); if (!c?.email) return;
   const first = (c.name || "").split(/\s+/)[0] || "there";
   const photo = await receiptPhoto(b);
   const body = [`Hi ${first},`, "",
-    `Thanks for consigning with Wheelhouse. This is your receipt: we received ${b.cards ? `${b.cards} card${b.cards === 1 ? "" : "s"}` : "your cards"} from you on ${fmtDay(b.recv)} (batch ${b.id}), to be sold through ${PLAT[b.plat] || "our auction partners"}.`, "",
+    `Thanks for consigning with Wheelhouse. This is your receipt: we received ${b.cards ? `${b.cards} card${b.cards === 1 ? "" : "s"}` : "your cards"} from you on ${fmtDay(b.recv)} (${b.id ? `batch ${b.id}` : `SKU ${lot?.sku || ""}`}), to be sold through ${PLAT[b.plat] || "our auction partners"}.`, "",
     photo && emailSend.attachments ? "A photo of the cards you dropped off is attached for both of our records." : null, photo && emailSend.attachments ? "" : null,
     `You can see every card from this drop-off in your Wheelhouse customer portal: ${SITE}`, "",
     `As each card is listed and sold, the portal shows its status, the sale price and what you’ll receive.${photo || (b.photos || []).length ? " Your drop-off photos are there too." : ""} Please allow some time for curation.`, "",
     `To sign in, use this email address (${c.email}). The first time, choose “Create account” with that same email.`, "",
     "Thanks,", "Wheelhouse"].filter(x => x !== null).join("\n");
-  openMail(c, null, { subject: `Wheelhouse consignment receipt: batch ${b.id}`, body }, {
-    title: "Receipt email", photo, out: "#b-msg",
-    onSent: () => updateDoc(doc(db, "batches", b.id), { receiptAt: now() }),
+  openMail(c, null, { subject: `Wheelhouse consignment receipt: ${b.id ? `batch ${b.id}` : `SKU ${lot?.sku || ""}`}`, body }, {
+    title: "Receipt email", photo, out: lot ? "#dx-msg" : "#b-msg",
+    onSent: () => b.id ? updateDoc(doc(db, "batches", b.id), { receiptAt: now() }) : updateDoc(listingRef(lot.id), { receiptAt: now() }),
   });
 }
 /* ---------- Fanatics auction end dates ---------- */
