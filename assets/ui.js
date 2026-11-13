@@ -252,7 +252,7 @@ export function askFormHtml(l, staff = false) {
     <h3 style="margin:0">${staff ? (l.askPrice != null ? "Change the customer’s asking price" : "Enter the customer’s asking price") : l.askPrice != null ? "Change your asking price" : "Set your asking price"}</h3>
     <p class="muted" style="margin:0">${staff ? "Customers see this box and fill it in themselves. If they gave you a price by phone, text or in the store, enter it here." : `This card will go up as a Buy It Now on ${PLAT[l.plat] || "the site"}. Tell us what you’d like to ask for it and we’ll list it.`}</p>
     <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <div class="f" style="flex:0 0 160px"><label for="ask-price">Asking price ($)</label><input id="ask-price" type="text" inputmode="decimal" autocomplete="off" required value="${l.askPrice ?? ""}" placeholder="e.g. 250"></div>
+      <div class="f" style="flex:0 0 160px"><label for="ask-price">Asking price ($)</label><input id="ask-price" type="text" inputmode="decimal" autocomplete="off" value="${l.askPrice ?? ""}" placeholder="e.g. 250"></div>
       <div class="f" style="flex:0 0 200px"><label for="ask-min">Minimum Offer (Optional)</label><input id="ask-min" type="text" inputmode="decimal" autocomplete="off" value="${l.askMin ?? ""}" placeholder="Leave blank for no offers"></div>
       <button class="btn" type="submit">${staff ? "Save price" : l.askPrice != null ? "Update my price" : "Send my price"}</button>
     </div>
@@ -428,8 +428,10 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
   modal.body.addEventListener("submit", async e => {
     const f = e.target.closest("[data-askform]"); if (!f) return; e.preventDefault();
     const num = v => Math.round(parseFloat(String(v).replace(/[$,\s]/g, "")) * 100) / 100; // accepts 250, $250, 1,250.50
-    const price = num(f.querySelector("#ask-price").value), mv = f.querySelector("#ask-min").value.trim(), min = mv ? num(mv) : null, msg = f.querySelector("[data-askmsg]");
-    if (!(price > 0)) { msg.textContent = "Enter a price above $0."; return; }
+    const pv = f.querySelector("#ask-price").value.trim(), price = pv ? num(pv) : null, mv = f.querySelector("#ask-min").value.trim(), min = mv ? num(mv) : null, msg = f.querySelector("[data-askmsg]");
+    // Leaving the asking price blank clears it (and the minimum offer), so the card goes back to waiting on a price.
+    if (price == null && min != null) { msg.textContent = "Enter an asking price to set a minimum offer, or clear both."; return; }
+    if (price != null && !(price > 0)) { msg.textContent = "Enter the asking price as a number above $0, or leave it blank."; return; }
     if (min != null && isNaN(min)) { msg.textContent = "Enter the minimum offer as a number, like 200."; return; }
     if (min != null && !(min > 0 && min <= price)) { msg.textContent = "The minimum offer should be more than $0 and no higher than the asking price."; return; }
     f.querySelector("button").disabled = true; msg.textContent = "Sending…";

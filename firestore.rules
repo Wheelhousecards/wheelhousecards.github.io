@@ -41,8 +41,10 @@ service cloud.firestore {
       allow update: if isStaff() || (ownsDoc()
         && resource.data.status == "awaitprice"
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["askPrice", "askMin", "askAt"])
-        && request.resource.data.askPrice is number
-        && request.resource.data.askPrice > 0 && request.resource.data.askPrice < 10000000
+        && (request.resource.data.askPrice == null
+          ? request.resource.data.get("askMin", null) == null
+          : (request.resource.data.askPrice is number
+             && request.resource.data.askPrice > 0 && request.resource.data.askPrice < 10000000))
         && (request.resource.data.get("askMin", null) == null
           || (request.resource.data.askMin is number && request.resource.data.askMin > 0
               && request.resource.data.askMin <= request.resource.data.askPrice))

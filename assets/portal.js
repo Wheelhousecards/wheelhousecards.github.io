@@ -1,9 +1,9 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261113112157";
+import { db, logout } from "./firebase.js?v=20261113113649";
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261113112157";
-import { setupGate, gateMarkup } from "./gate.js?v=20261113112157";
-import { contact, emailSend } from "./firebase-config.js?v=20261113112157";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261113113649";
+import { setupGate, gateMarkup } from "./gate.js?v=20261113113649";
+import { contact, emailSend } from "./firebase-config.js?v=20261113113649";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
@@ -17,7 +17,7 @@ const dash = mountDashboard($("#dash"), "", {
   // Customers can only set their asking price on a card that is Awaiting price (see firestore.rules).
   askPrice: async (id, price, min) => {
     await updateDoc(doc(db, "listings", id), { askPrice: price, askMin: min, askAt: serverTimestamp() });
-    notifyStaff(state.listings.find(l => l.id === id), state.customer, price, min);
+    if (price != null) notifyStaff(state.listings.find(l => l.id === id), state.customer, price, min);
   },
 });
 // Email consignment@ when a customer sends an asking price. Best effort: the price is already saved, so a failed email never bothers the customer.

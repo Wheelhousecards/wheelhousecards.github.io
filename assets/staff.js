@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261113112157";
+import { db, logout } from "./firebase.js?v=20261113113649";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey
-} from "./ui.js?v=20261113112157";
-import { setupGate, gateMarkup } from "./gate.js?v=20261113112157";
-import { emailSend, contact } from "./firebase-config.js?v=20261113112157";
+} from "./ui.js?v=20261113113649";
+import { setupGate, gateMarkup } from "./gate.js?v=20261113113649";
+import { emailSend, contact } from "./firebase-config.js?v=20261113113649";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -294,13 +294,36 @@ function renderAskAlert() {
   const asks = S.all.filter(l => l.status === "awaitprice" && l.askPrice != null).sort((a, b) => String(b.askAt?.seconds ?? b.askAt ?? "").localeCompare(String(a.askAt?.seconds ?? a.askAt ?? "")));
   const box = $("#ask-alert");
   document.title = (asks.length ? `(${asks.length}) ` : "") + "Wheelhouse Consignment Staff";
-  box.hidden = !asks.length; if (!asks.length) { box.innerHTML = ""; return; }
+  // Customers who still owe us a price: one "Email price request" per customer, covering all their Awaiting-price cards.
+  const waiting = new Map();
+  S.all.filter(l => l.status === "awaitprice" && l.askPrice == null).forEach(l => { const a = waiting.get(l.cust) || waiting.set(l.cust, []).get(l.cust); a.push(l); });
+  const waitHtml = waiting.size ? `<div style="display:grid;gap:6px${asks.length ? ";margin-top:6px;padding-top:10px;border-top:1px solid #f0d7a8" : ""}"><b>Waiting on a price from the customer</b>
+    <ul class="ask-list">${[...waiting].map(([cid, ls]) => { const c = custById(cid); return `<li>${esc(c?.name || "No consignor")} <span class="code">${esc(c?.code || "")}</span> · ${ls.length} card${ls.length === 1 ? "" : "s"}${ls.some(l => l.askReqAt) ? ` · <span class="muted">asked ${fmtDay(String(ls.map(l => l.askReqAt || "").sort().pop()).slice(0, 10))}</span>` : ""}
+      ${c?.email ? `<button class="btn ghost sm" type="button" data-ask-req="${cid}">${ls.some(l => l.askReqAt) ? "Email a reminder" : "Email price request"}</button>` : '<span class="muted">No email on file</span>'}</li>`; }).join("")}</ul></div>` : "";
+  box.hidden = !asks.length && !waiting.size; if (box.hidden) { box.innerHTML = ""; return; }
+  if (!asks.length) { box.innerHTML = waitHtml; return; }
   box.innerHTML = `<b>${asks.length === 1 ? "A customer sent their asking price" : `${asks.length} customers sent their asking price`}</b>
     <ul class="ask-list">${asks.map(l => `<li data-id="${l.id}"><button class="linkbtn code" type="button" data-open="${l.id}">${esc(l.sku)}</button> · ${esc(custById(l.cust)?.name || "")} · <b>${money(l.askPrice)}</b>${askMinText(l)} · ${esc(l.title.length > 60 ? l.title.slice(0, 58) + "…" : l.title)}
       <button class="btn sm" type="button" data-ask-live="${l.id}">Mark listed at ${money(l.askPrice)}</button></li>`).join("")}</ul>
-    <div class="muted" style="font-size:12px">List each card on Fanatics as a Buy It Now at the customer’s price, then click <b>Mark listed</b>: it sets the price, Buy It Now and Live, and the card drops off this list. Paste the listing link on the card when you have it.</div>`;
+    <div class="muted" style="font-size:12px">List each card on Fanatics as a Buy It Now at the customer’s price, then click <b>Mark listed</b>: it sets the price, Buy It Now and Live, and the card drops off this list. Paste the listing link on the card when you have it.</div>` + waitHtml;
+}
+function priceRequestEmail(c, ls) {
+  const first = (c.name || "").split(/\s+/)[0] || "there", n = ls.length;
+  return { subject: `Your asking price for ${n === 1 ? "1 card" : `${n} cards`} · Wheelhouse Consignment`, body: [
+    `Hi ${first},`, "",
+    `We’re getting ready to list ${n === 1 ? "one of your cards" : `${n} of your cards`} as a Buy It Now on Fanatics Collect, and we’d like your asking price${n === 1 ? "" : " for each"}:`, "",
+    ...ls.map(l => `- SKU ${l.sku} · ${l.title}${l.grade && l.grade !== "Ungraded" ? ` (${l.grade})` : ""}`), "",
+    `To set your price, sign in to your Wheelhouse customer portal at ${SITE}, open ${n === 1 ? "the card" : "each card"} and enter your asking price. You can add a minimum offer if you’d take offers. Each card also links to what it has recently sold for on eBay.`, "",
+    `Sign in with this email address (${c.email}). The first time, choose “Create account” with that same email.`, "",
+    "If it’s easier, just reply to this email with your prices.", "", "Thanks,", "Wheelhouse"].join("\n") };
 }
 $("#ask-alert").addEventListener("click", async e => {
+  if (e.target.dataset.askReq) {
+    const c = custById(e.target.dataset.askReq), ls = S.all.filter(l => l.cust === c?.id && l.status === "awaitprice" && l.askPrice == null).sort((a, b) => (a.sku || "").localeCompare(b.sku || ""));
+    if (!c || !ls.length) return;
+    openMail(c, null, priceRequestEmail(c, ls), { title: "Price request", out: "#ledger-msg", onSent: () => commit(ls.map(l => upd(l.id, { askReqAt: now() }))) });
+    return;
+  }
   const id = e.target.dataset.askLive; if (!id) return;
   const l = S.all.find(x => x.id === id); if (!l || l.askPrice == null) return;
   e.target.disabled = true;
