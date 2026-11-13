@@ -417,6 +417,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
     const t = e.target.dataset.t; if (!t) return;
     tab = t; [...q("tabs").children].forEach(b => b.setAttribute("aria-pressed", b.dataset.t === t)); render();
   });
+  root.addEventListener("click", e => { const g = e.target.closest("[data-goto]"); if (g) q("tabs").querySelector(`[data-t="${g.dataset.goto}"]`)?.click(); });
   q("plat").addEventListener("change", () => render());
   const modal = createModal();
   const openCard = id => {
@@ -529,7 +530,11 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
       banner = `<div class="notice curating"><b>Some of your cards aren’t listed yet</b><span>That’s normal. ${waiting.length || loose.length ? "Fanatics Collect and PC Sportscards review every card before listing it, which can take a while. " : ""}They’ll show up here as soon as they go live.${loose.length ? " You can see them under Everything." : ""}</span><ul>${lines.map(t => `<li>${t}</li>`).join("")}</ul></div>`;
     }
     banner = priceBanner + banner;
-    const list = mine.filter(l => (tab === "all" || (tab === "live" ? l.status === "live" : isSold(l) || l.status === "pending")) && (!fp || l.plat === fp))
+    // Customers don't see SKUs that are fully paid out; those live in the Payouts tab. Staff still see everything.
+    const paidOff = l => l.status === "paid" || (isLot(l) && (l.items || []).length > 0 && (l.items || []).some(x => x.status === "paid")
+      && (l.items || []).every(x => x.status === "paid" || x.status === "cancelled" || x.status === "returned" || x.status === "unsold" || isHouseRelist(x, l.items)));
+    const hiddenPaid = staff ? 0 : mine.filter(paidOff).length;
+    const list = mine.filter(l => (staff || !paidOff(l)) && (tab === "all" || (tab === "live" ? l.status === "live" : isSold(l) || l.status === "pending")) && (!fp || l.plat === fp))
       .sort((a, b) => {
         if (tab === "live") { const ea = a.ends ? new Date(a.ends) : Infinity, eb = b.ends ? new Date(b.ends) : Infinity; return ea - eb; }
         return new Date(b.soldDate || b.added) - new Date(a.soldDate || a.added);
@@ -570,7 +575,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
     };
     const platOrder = ["fan", "pcs", "store", "goldin", "shibe", "other"];
     const groups = platOrder.map(p => [p, list.filter(l => (PLAT[l.plat] ? l.plat : "other") === p)]).filter(([, g]) => g.length);
-    q("cards").innerHTML = banner + (list.length ? groups.map(([p, g]) => `<section class="platgroup"><h3 class="plathead ${p}">${PLAT[p]}<span class="n">${g.length} card${g.length === 1 ? "" : "s"}</span></h3>${g.map(cardHtml).join("")}</section>`).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`);
+    q("cards").innerHTML = banner + (list.length ? groups.map(([p, g]) => `<section class="platgroup"><h3 class="plathead ${p}">${PLAT[p]}<span class="n">${g.length} card${g.length === 1 ? "" : "s"}</span></h3>${g.map(cardHtml).join("")}</section>`).join("") : banner ? "" : `<div class="empty">${tab === "live" ? "Nothing live right now. New listings show up here as soon as we post them." : "No cards here yet."}</div>`) + (hiddenPaid && tab !== "live" ? `<div class="muted" style="font-size:13px;margin-top:10px">${hiddenPaid === 1 ? "1 paid-out SKU is" : `${hiddenPaid} paid-out SKUs are`} in your <button class="linkbtn" type="button" data-goto="payouts">Payouts</button> tab.</div>` : "");
   }
   return { render };
 }

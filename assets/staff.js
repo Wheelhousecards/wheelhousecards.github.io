@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261113154908";
+import { db, logout } from "./firebase.js?v=20261113172324";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey
-} from "./ui.js?v=20261113154908";
-import { setupGate, gateMarkup } from "./gate.js?v=20261113154908";
-import { emailSend, contact } from "./firebase-config.js?v=20261113154908";
+} from "./ui.js?v=20261113172324";
+import { setupGate, gateMarkup } from "./gate.js?v=20261113172324";
+import { emailSend, contact } from "./firebase-config.js?v=20261113172324";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
