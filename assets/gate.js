@@ -1,7 +1,7 @@
 // Sign-in screen shared by the customer portal and the staff app: email + password,
 // with a one-time email verification so nobody can claim someone else's email.
-import { signIn, signUp, resendVerification, resetPassword, refreshUser, watchAuth, logout } from "./firebase.js?v=20261113102554";
-import { $ } from "./ui.js?v=20261113102554";
+import { signIn, signUp, resendVerification, resetPassword, refreshUser, watchAuth, logout } from "./firebase.js?v=20261113112157";
+import { $ } from "./ui.js?v=20261113112157";
 
 const friendly = err => {
   const c = err?.code || "";
