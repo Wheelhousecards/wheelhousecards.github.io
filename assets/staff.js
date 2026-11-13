@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261113183413";
+import { db, logout } from "./firebase.js?v=20261113184836";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
-} from "./ui.js?v=20261113183413";
-import { setupGate, gateMarkup } from "./gate.js?v=20261113183413";
-import { emailSend, contact } from "./firebase-config.js?v=20261113183413";
+} from "./ui.js?v=20261113184836";
+import { setupGate, gateMarkup } from "./gate.js?v=20261113184836";
+import { emailSend, contact } from "./firebase-config.js?v=20261113184836";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -304,8 +304,9 @@ function renderAskAlert() {
   if (!asks.length) { box.innerHTML = waitHtml; return; }
   box.innerHTML = `<b>${asks.length === 1 ? "A customer sent their asking price" : `${asks.length} customers sent their asking price`}</b>
     <ul class="ask-list">${asks.map(l => `<li data-id="${l.id}"><button class="linkbtn code" type="button" data-open="${l.id}">${esc(l.sku)}</button> · ${esc(custById(l.cust)?.name || "")} · <b>${money(l.askPrice)}</b>${askMinText(l)} · ${esc(l.title.length > 60 ? l.title.slice(0, 58) + "…" : l.title)}
-      <button class="btn sm" type="button" data-ask-live="${l.id}">Mark listed at ${money(l.askPrice)}</button></li>`).join("")}</ul>
-    <div class="muted" style="font-size:12px">List each card on Fanatics as a Buy It Now at the customer’s price, then click <b>Mark listed</b>: it sets the price, Buy It Now and Live, and the card drops off this list. Paste the listing link on the card when you have it.</div>` + waitHtml;
+      <span class="ask-go"><input class="ask-url" data-ask-url="${l.id}" type="url" inputmode="url" autocomplete="off" placeholder="Paste the Fanatics link (optional)" value="${esc(l.url || "")}" aria-label="Fanatics listing link for SKU ${esc(l.sku)}">
+      <button class="btn sm" type="button" data-ask-live="${l.id}">Mark listed at ${money(l.askPrice)}</button></span></li>`).join("")}</ul>
+    <div class="muted" style="font-size:12px">List each card on Fanatics as a Buy It Now at the customer’s price, paste its link, then click <b>Mark listed</b>: it saves the link and sets the price, Buy It Now and Live, and the card drops off this list. The link is optional; you can add it on the card later.</div>` + waitHtml;
 }
 function priceRequestEmail(c, ls) {
   const first = (c.name || "").split(/\s+/)[0] || "there", n = ls.length;
@@ -327,8 +328,10 @@ $("#ask-alert").addEventListener("click", async e => {
   const id = e.target.dataset.askLive; if (!id) return;
   const l = S.all.find(x => x.id === id); if (!l || l.askPrice == null) return;
   e.target.disabled = true;
-  const ok = await guarded($("#ledger-msg"), async () => { await commit([upd(l.id, { price: l.askPrice, format: "bin", status: "live" })]); return true; });
-  if (ok) lmsg(`SKU ${l.sku} is Live as a Buy It Now at ${money(l.askPrice)}.${l.url ? "" : " Paste its Fanatics link in the Link column when you have it."}`); else e.target.disabled = false;
+  const url = ($(`#ask-alert [data-ask-url="${id}"]`)?.value || "").trim();
+  if (url && !/^https?:\/\/\S+\.\S+/.test(url)) { lmsg("That link doesn’t look right. Paste the full Fanatics link (starting with https://) or leave it blank."); e.target.disabled = false; return; }
+  const ok = await guarded($("#ledger-msg"), async () => { await commit([upd(l.id, { price: l.askPrice, format: "bin", status: "live", ...(url ? { url } : {}) })]); return true; });
+  if (ok) lmsg(`SKU ${l.sku} is Live as a Buy It Now at ${money(l.askPrice)}${url ? " with its Fanatics link" : ""}.${url || l.url ? "" : " Paste its Fanatics link in the Link column when you have it."}`); else e.target.disabled = false;
 });
 // Bell in the header: everything that needs staff attention, worked out live from the data (nothing to dismiss; items clear when they're done).
 function bellItems() {
