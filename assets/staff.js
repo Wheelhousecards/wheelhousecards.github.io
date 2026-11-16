@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261116150841";
+import { db, logout } from "./firebase.js?v=20261116155711";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
-} from "./ui.js?v=20261116150841";
-import { setupGate, gateMarkup } from "./gate.js?v=20261116150841";
-import { emailSend, contact } from "./firebase-config.js?v=20261116150841";
+} from "./ui.js?v=20261116155711";
+import { setupGate, gateMarkup } from "./gate.js?v=20261116155711";
+import { emailSend, contact } from "./firebase-config.js?v=20261116155711";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -42,7 +42,9 @@ function loadHistory() {
   return histReady;
 }
 const custHist = new Map();
-const ui = { view: "play", section: "all", mode: "staff", cv: "", sel: new Set(), visible: [] };
+const ui = { view: "play", section: "all", mode: "staff", cv: "", sel: new Set(), visible: [], sort: "sku" };
+// Auction # sort key: WA253 / 253 → 253; Vault, BIN and blank sort last.
+const aucNum = l => { const m = (l.format !== "bin" && (l.period || "").match(/^(?:wa)?\s*(\d+)$/i)); return m ? +m[1] : -1; };
 let me = "", unsubs = [], ready = new Set();
 const custById = id => S.customers.find(c => c.id === id);
 // Wheelhouse's own cards live under one house consignor (WH-00): tracked like any card, never paid out or emailed.
@@ -373,6 +375,16 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#bell-
 // "Clear filters" shows whenever the card list is filtered, so it's always one click back to every card.
 const LEDGER_FILTERS = ["#f-q", "#f-cust", "#f-plat", "#f-st", "#f-batch", "#f-added"];
 $("#f-clear").addEventListener("click", () => { LEDGER_FILTERS.forEach(x => { $(x).value = ""; }); document.querySelectorAll(".filters .csearch").forEach(b => { b.value = ""; }); renderLedger(); });
+$("#sort-auc").addEventListener("click", () => { ui.sort = ui.sort === "auc" ? "sku" : "auc"; renderLedger(); });
+// Click an Auction # in the end-dates panel: show just that auction's cards in the card list, ready to mark sold.
+$("#fa-body").addEventListener("click", e => {
+  const k = e.target.dataset.auc; if (!k) return;
+  LEDGER_FILTERS.forEach(x => { $(x).value = ""; }); document.querySelectorAll(".filters .csearch").forEach(b => { b.value = ""; });
+  $("#f-q").value = k; $("#f-plat").value = "fan"; ui.section = "all"; ui.sort = "auc";
+  if (ui.view !== "play") setView("play");
+  renderLedger(); $("#ledger").scrollIntoView({ behavior: "smooth", block: "start" });
+  lmsg(`Showing the cards in ${k}. Set each one to Sold and enter its price. “Clear filters” shows every card again.`);
+});
 function renderLedger() {
   renderAskAlert(); renderBell();
   $("#f-clear").hidden = !LEDGER_FILTERS.some(x => $(x).value);
@@ -399,8 +411,9 @@ function renderLedger() {
     (!fc || (fc === "__none" ? !custById(l.cust) : l.cust === fc)) &&
     (!fp || l.plat === fp) && (!fs || l.status === fs) &&
     (!fb || (fb === "__nob" ? !batchById(l.batch) : l.batch === fb)) &&
-    (!q || [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q))
-  ).sort(skuDesc); // always newest SKU first
+    (!q || [l.sku, l.title, l.item, l.grade, l.cert, l.period].join(" ").toLowerCase().includes(q))
+  ).sort(ui.sort === "auc" ? (a, b) => aucNum(b) - aucNum(a) || skuDesc(a, b) : skuDesc); // newest SKU first, or by Auction # (newest auction first)
+  $("#sort-auc").setAttribute("aria-pressed", ui.sort === "auc"); $("#sort-auc").querySelector("span").textContent = ui.sort === "auc" ? "↓" : "↕";
   const viewName = { play: ui.section === "house" ? "on hand" : "in play", paid: ui.section === "house" ? "sold" : "paid out", returned: "returned", all: "in total", removed: "removed", archived: "archived", batch: "in total" }[view];
   $("#ledger-h").textContent = ui.section === "house" ? "Wheelhouse inventory" : "All consigned cards";
   document.querySelector('#views [data-v="play"]').textContent = ui.section === "house" ? "On hand" : "In play";
@@ -416,7 +429,7 @@ function renderLedger() {
   const other = q && !rows.length && !loading && ui.section !== "all" ? S.all.filter(l => l.status !== "removed" && (ui.section === "house" ? !isHouse(custById(l.cust)) : isHouse(custById(l.cust))) && [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q)).length : 0;
   $("#count").textContent = other ? `No matches here · ${other} in ${ui.section === "house" ? "Customer consignments" : "Wheelhouse inventory"}` : loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
   $("#th-price").textContent = view === "paid" ? "Sale / to consignor" : "Price / bid";
-  $("#th-when").textContent = "Auction #";
+
   ui.visible = rows.map(l => l.id);
   const custSel = [...S.customers].sort(byName).map(x => `<option value="${x.id}">${esc(x.name)} · ${esc(x.code)}</option>`).join("");
   const shown = rows.slice(0, 500);
@@ -1183,7 +1196,7 @@ function renderFanAuctions() {
   const keys = [...by.keys()].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
   $("#fa-count").textContent = keys.length ? `${keys.length} auction${keys.length === 1 ? "" : "s"}` : "";
   if ($("#fa-body").contains(document.activeElement)) return;
-  $("#fa-body").innerHTML = keys.length ? keys.map(k => `<tr data-k="${esc(k)}"><td><span class="code">${esc(k)}</span></td><td class="num">${by.get(k)}</td>
+  $("#fa-body").innerHTML = keys.length ? keys.map(k => `<tr data-k="${esc(k)}"><td><button class="linkbtn code" type="button" data-auc="${esc(k)}" title="Show the cards in ${esc(k)} in the card list">${esc(k)}</button></td><td class="num">${by.get(k)}</td>
     <td><input type="date" value="${esc(S.fanEnds?.[k] || "")}" aria-label="End date for auction ${esc(k)}"></td>
     <td>${S.fanEnds?.[k] ? `<span class="muted" style="font-size:12px">Ends ${fmtDay(S.fanEnds[k])}</span>` : '<span class="need" style="font-size:12px">No end date</span>'}</td></tr>`).join("")
     : '<tr><td colspan="4"><div class="empty">No live or curating Fanatics cards have an Auction # yet.</div></td></tr>';

@@ -275,3 +275,6 @@ article.card.payout details[open] summary{margin-bottom:8px}
 .ask-go{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:6px}
 .ask-url{width:min(320px,100%);padding:5px 8px;border:1px solid var(--line,#ccc);border-radius:6px;font:inherit;font-size:13px}
 .st.archived{background:#6b7280}
+.th-sort{all:unset;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit}
+.th-sort:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.th-sort[aria-pressed="true"]{text-decoration:underline}
