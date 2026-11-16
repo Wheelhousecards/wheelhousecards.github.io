@@ -274,3 +274,4 @@ article.card.payout details[open] summary{margin-bottom:8px}
 .ask-list li{line-height:1.6}
 .ask-go{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:6px}
 .ask-url{width:min(320px,100%);padding:5px 8px;border:1px solid var(--line,#ccc);border-radius:6px;font:inherit;font-size:13px}
+.st.archived{background:#6b7280}

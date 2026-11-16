@@ -463,6 +463,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
     const pl = payLine(c);
     q("contact").innerHTML = `<span class="code">${esc(c.code)}</span> · ${esc(c.email || "No email on file")} · ${esc(c.phone || "No phone on file")}<br>${pl ? `Payouts go by ${esc(pl)}` : `Payout method not set yet. Tell us how you’d like to be paid <a href="mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("My payout method")}">here</a>.`}`;
     const mine = listings.filter(l => l.status !== "removed" && l.status !== "archived");
+    const nArchived = staff ? listings.filter(l => l.status === "archived").length : 0;
     const live = mine.filter(l => l.status === "live"), liveVal = live.reduce((s, l) => s + (l.price || 0), 0);
     const thirty = Date.now() - 30 * 864e5, sold30 = mine.filter(l => isSold(l) && new Date(l.soldDate || 0) > thirty);
     const owed = owedFor(c, mine).amount;
@@ -529,7 +530,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
       ];
       banner = `<div class="notice curating"><b>Some of your cards aren’t listed yet</b><span>That’s normal. ${waiting.length || loose.length ? "Fanatics Collect and PC Sportscards review every card before listing it, which can take a while. " : ""}They’ll show up here as soon as they go live.${loose.length ? " You can see them under Everything." : ""}</span><ul>${lines.map(t => `<li>${t}</li>`).join("")}</ul></div>`;
     }
-    banner = priceBanner + banner;
+    banner = priceBanner + banner + (nArchived ? `<div class="notice"><b>${nArchived} archived card${nArchived === 1 ? " is" : "s are"} hidden from this customer</b><span>Staff can see ${nArchived === 1 ? "it" : "them"} in the Archived tab of the card list.</span></div>` : "");
     // Customers don't see SKUs that are fully paid out; those live in the Payouts tab. Staff still see everything.
     const paidOff = l => l.status === "paid" || (isLot(l) && (l.items || []).length > 0 && (l.items || []).some(x => x.status === "paid")
       && (l.items || []).every(x => x.status === "paid" || x.status === "cancelled" || x.status === "returned" || x.status === "unsold" || isHouseRelist(x, l.items)));
