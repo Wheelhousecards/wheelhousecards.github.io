@@ -6,7 +6,7 @@ export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;"
 export const money = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n < 100 ? 2 : 0 }).format(n);
 export const PLAT = { fan: "Fanatics Collect", pcs: "PC Sportscards", store: "In store at Wheelhouse", goldin: "Goldin", shibe: "Shibe Sports", other: "Other" };
 // pending = sold, waiting on the buyer's payment (not owed to the consignor yet).
-export const STAT = { curating: "Being curated", awaitprice: "Awaiting price", live: "Live", pending: "Pending sale", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you", removed: "Removed" };
+export const STAT = { curating: "Being curated", awaitprice: "Awaiting price", live: "Live", pending: "Pending sale", sold: "Sold", unsold: "Unsold", paid: "Paid out", returned: "Returned to you", removed: "Removed", archived: "Archived" };
 export const pad6 = n => String(n).padStart(6, "0");
 export const plural = n => `${n} card${n === 1 ? "" : "s"}`;
 export const isSold = l => l.status === "sold" || l.status === "paid";
@@ -462,7 +462,7 @@ export function mountDashboard(root, pickerHtml, { loadPhoto, staff = false, ask
     q("name").textContent = c.name;
     const pl = payLine(c);
     q("contact").innerHTML = `<span class="code">${esc(c.code)}</span> · ${esc(c.email || "No email on file")} · ${esc(c.phone || "No phone on file")}<br>${pl ? `Payouts go by ${esc(pl)}` : `Payout method not set yet. Tell us how you’d like to be paid <a href="mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("My payout method")}">here</a>.`}`;
-    const mine = listings.filter(l => l.status !== "removed");
+    const mine = listings.filter(l => l.status !== "removed" && l.status !== "archived");
     const live = mine.filter(l => l.status === "live"), liveVal = live.reduce((s, l) => s + (l.price || 0), 0);
     const thirty = Date.now() - 30 * 864e5, sold30 = mine.filter(l => isSold(l) && new Date(l.soldDate || 0) > thirty);
     const owed = owedFor(c, mine).amount;

@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261113184836";
+import { db, logout } from "./firebase.js?v=20261116140505";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,22 +10,22 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
-} from "./ui.js?v=20261113184836";
-import { setupGate, gateMarkup } from "./gate.js?v=20261113184836";
-import { emailSend, contact } from "./firebase-config.js?v=20261113184836";
+} from "./ui.js?v=20261116140505";
+import { setupGate, gateMarkup } from "./gate.js?v=20261116140505";
+import { emailSend, contact } from "./firebase-config.js?v=20261116140505";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
 // cards (thousands from the old system) load only when needed, so the app stays inside Firestore's free daily reads.
 // "removed" is a recycle bin: removed cards can be restored until they're deleted for good.
-const ACTIVE = ["curating", "awaitprice", "live", "pending", "sold", "unsold"], PAST = ["paid", "returned", "removed"];
+const ACTIVE = ["curating", "awaitprice", "live", "pending", "sold", "unsold"], PAST = ["paid", "returned", "removed", "archived"];
 const S = { pool: [], imports: [], customers: [], active: [], hist: null, batches: [], staff: [], notes: {}, counters: {}, _all: null };
 // S.all includes removed cards (for the Removed tab, restores and SKU checks); S.listings leaves them out.
 Object.defineProperty(S, "all", { get() {
   if (!S._all) {
     if (!S.hist) S._all = S.active;
     else { const m = new Map(S.hist.map(l => [l.id, l])); S.active.forEach(l => m.set(l.id, l)); S._all = [...m.values()]; }
-    S._live = S._all.filter(l => l.status !== "removed");
+    S._live = S._all.filter(l => l.status !== "removed" && l.status !== "archived");
   }
   return S._all;
 } });
@@ -392,7 +392,7 @@ function renderLedger() {
   const fav = $("#f-added").value, fa = fav === "today" ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString() : fav === "7d" ? new Date(Date.now() - 7 * 864e5).toISOString() : fav === "1h" ? new Date(Date.now() - 36e5).toISOString() : "";
   const loading = past && !S.hist;
   const rows = (loading ? [] : S.all).filter(l =>
-    (view === "all" || view === "batch" ? l.status !== "removed" : view === "play" ? !PAST.includes(l.status) : l.status === view) &&
+    (view === "all" || view === "batch" ? l.status !== "removed" && l.status !== "archived" : view === "play" ? !PAST.includes(l.status) : l.status === view) &&
     (ui.section === "all" || (ui.section === "house" ? isHouse(custById(l.cust)) : !isHouse(custById(l.cust)))) &&
     (!fa || (l.added || "") >= fa) &&
     (!fc || (fc === "__none" ? !custById(l.cust) : l.cust === fc)) &&
@@ -400,7 +400,7 @@ function renderLedger() {
     (!fb || (fb === "__nob" ? !batchById(l.batch) : l.batch === fb)) &&
     (!q || [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q))
   ).sort(skuDesc); // always newest SKU first
-  const viewName = { play: ui.section === "house" ? "on hand" : "in play", paid: ui.section === "house" ? "sold" : "paid out", returned: "returned", all: "in total", removed: "removed", batch: "in total" }[view];
+  const viewName = { play: ui.section === "house" ? "on hand" : "in play", paid: ui.section === "house" ? "sold" : "paid out", returned: "returned", all: "in total", removed: "removed", archived: "archived", batch: "in total" }[view];
   $("#ledger-h").textContent = ui.section === "house" ? "Wheelhouse inventory" : "All consigned cards";
   document.querySelector('#views [data-v="play"]').textContent = ui.section === "house" ? "On hand" : "In play";
   document.querySelector('#views [data-v="paid"]').textContent = ui.section === "house" ? "Sold" : "Paid out";
@@ -409,7 +409,8 @@ function renderLedger() {
     const bOrder = new Map([...S.batches].sort((a, b) => (b.recv || "").localeCompare(a.recv || "") || b.id.localeCompare(a.id)).map((b, i) => [b.id, i]));
     rows.sort((a, b) => (bOrder.get(a.batch) ?? 1e9) - (bOrder.get(b.batch) ?? 1e9) || skuDesc(a, b));
   }
-  $("#bb-del").hidden = view === "removed"; $("#bb-restore").hidden = view !== "removed"; $("#bb-purge").hidden = view !== "removed";
+  $("#bb-del").hidden = view === "removed" || view === "archived"; $("#bb-restore").hidden = view !== "removed"; $("#bb-purge").hidden = view !== "removed";
+  $("#bb-arch").hidden = view !== "paid"; $("#bb-unarch").hidden = view !== "archived";
   // A search that finds nothing here but matches cards in the other section says so.
   const other = q && !rows.length && !loading && ui.section !== "all" ? S.all.filter(l => l.status !== "removed" && (ui.section === "house" ? !isHouse(custById(l.cust)) : isHouse(custById(l.cust))) && [l.sku, l.title, l.item, l.grade, l.cert].join(" ").toLowerCase().includes(q)).length : 0;
   $("#count").textContent = other ? `No matches here · ${other} in ${ui.section === "house" ? "Customer consignments" : "Wheelhouse inventory"}` : loading ? "Loading past cards…" : `${rows.length.toLocaleString()} card${rows.length === 1 ? "" : "s"} ${viewName}` + (view === "paid" && rows.length ? ` · ${money(rows.reduce((s, l) => s + (l.price || 0), 0))} in sales` : "");
@@ -440,7 +441,7 @@ function renderLedger() {
       <td>${isDropoff(l) ? "Auction" : `<select data-f="format" aria-label="Format for SKU ${esc(l.sku)}"><option value="auction"${l.format !== "bin" ? " selected" : ""}>Auction</option><option value="bin"${l.format === "bin" ? " selected" : ""}>Buy It Now</option></select>`}</td>
       <td><input class="price num" type="number" step="0.01" min="0" value="${l.price ?? ""}" data-f="price" aria-label="Price for SKU ${esc(l.sku)}">${l.status === "awaitprice" ? `<div class="cert ${l.askPrice != null ? "ask-in" : ""}">${l.askPrice != null ? `Customer asked ${money(l.askPrice)}${askMinText(l)}` : "Waiting on customer’s price"}</div>` : ""}${l.status === "paid" || l.status === "sold" ? `<div class="cert">${shareText(cardPayout(l, custById(l.cust)), true)} to consignor${l.payout == null && !isDropoff(l) && cardSplit(l, custById(l.cust)) != null ? ` (${cardSplit(l, custById(l.cust))}%)` : ""}</div>` : ""}</td>
       <td class="num">${l.plat === "pcs" || l.plat === "store" ? '<span class="muted" title="No auction numbers here">—</span>' : l.format === "bin" ? '<span class="muted" title="Buy It Now has no auction">—</span>' : `<input class="auction" data-f="period" value="${esc(l.period || "")}" placeholder="Auction #" maxlength="40" spellcheck="false" autocapitalize="characters" aria-label="Auction # for SKU ${esc(l.sku)}">`}${PAST.includes(l.status) || l.status === "sold" ? `<div class="cert">${l.status === "returned" ? "Added" : "Sold"} ${esc(fmtDay((l.soldDate || l.added || "").slice(0, 10)))}</div>` : ""}</td>
-      <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" class="stsel s-${l.status}" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
+      <td>${isDropoff(l) ? `<span class="st ${l.status}">${STAT[l.status]}</span>` : `<select data-f="status" class="stsel s-${l.status}" aria-label="Status for SKU ${esc(l.sku)}">${Object.keys(STAT).filter(k => k !== "removed" && k !== "archived").map(k => `<option value="${k}"${k === l.status ? " selected" : ""}>${STAT[k]}</option>`).join("")}</select>`}</td>
       <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Open</a>` : `<input data-f="url" placeholder="Paste link" aria-label="Listing link for SKU ${esc(l.sku)}" style="width:120px">`}</td>
       <td><button class="x" type="button" data-del aria-label="Remove SKU ${esc(l.sku)}">${delOne === l.id ? "Sure?" : "×"}</button></td></tr>`;
   }).join("") + (rows.length > 500 ? `<tr><td colspan="12" class="muted">Showing the first 500 of ${rows.length}. Search or filter to narrow it down.</td></tr>` : "")
@@ -1431,6 +1432,32 @@ $("#bb-del").addEventListener("click", e => {
 });
 const softRemove = l => upd(l.id, { status: "removed", prevStatus: l.status === "removed" ? (l.prevStatus || "live") : l.status, removedAt: now(), removedBy: me });
 const restoreOp = l => upd(l.id, { status: l.prevStatus || "live", prevStatus: null, removedAt: null });
+// Archive: hide old paid-out cards everywhere (card list, customer pages). Unarchive puts them back as they were.
+const archivePatch = l => upd(l.id, { status: "archived", prevStatus: l.status, archivedAt: now(), archivedBy: me });
+$("#bb-arch").addEventListener("click", e => bulk(e.target, async () => {
+  const ls = selected().filter(l => l.status === "paid");
+  for (let i = 0; i < ls.length; i += 400) await commit(ls.slice(i, i + 400).map(archivePatch));
+  ui.sel.clear(); lmsg(`Archived ${plural(ls.length)}. Find them in the Archived tab.`);
+}));
+$("#bb-unarch").addEventListener("click", e => bulk(e.target, async () => {
+  const ls = selected().filter(l => l.status === "archived");
+  for (let i = 0; i < ls.length; i += 400) await commit(ls.slice(i, i + 400).map(l => upd(l.id, { status: l.prevStatus || "paid", archivedAt: null, archivedBy: null })));
+  ui.sel.clear(); lmsg(`Unarchived ${plural(ls.length)}.`);
+}));
+let arArm = "";
+$("#ar-date").value = (() => { const d = new Date(); d.setDate(0); return d.toISOString().slice(0, 10); })();
+$("#ar-date").addEventListener("input", () => { arArm = ""; $("#ar-go").textContent = "Archive"; $("#ar-msg").textContent = ""; });
+$("#ar-go").addEventListener("click", async e => {
+  await loadHistory();
+  const d = $("#ar-date").value; if (!d) { $("#ar-msg").textContent = "Pick a date first."; return; }
+  const ls = S.all.filter(l => l.status === "paid" && !isDropoff(l) && (l.soldDate || "").slice(0, 10) && (l.soldDate || "").slice(0, 10) <= d);
+  if (!ls.length) { $("#ar-msg").textContent = `No paid-out cards sold on or before ${fmtDay(d)}.`; return; }
+  if (arArm !== d + ls.length) { arArm = d + ls.length; e.target.textContent = `Confirm: archive ${ls.length.toLocaleString()} cards`; $("#ar-msg").textContent = `${ls.length.toLocaleString()} paid-out cards sold on or before ${fmtDay(d)}. Click again to archive them.`; return; }
+  arArm = ""; e.target.disabled = true; $("#ar-msg").textContent = "Archiving…";
+  try { for (let i = 0; i < ls.length; i += 400) await commit(ls.slice(i, i + 400).map(archivePatch)); $("#ar-msg").textContent = `Archived ${ls.length.toLocaleString()} cards. They’re in the Archived tab of the card list if you ever need them.`; }
+  catch (err) { console.error(err); $("#ar-msg").textContent = "Something went wrong partway through. Click Archive again to finish the rest."; }
+  finally { e.target.disabled = false; e.target.textContent = "Archive"; }
+});
 $("#bb-restore").addEventListener("click", e => bulk(e.target, async () => {
   const ls = selected().filter(l => l.status === "removed");
   await commit(ls.map(restoreOp));
