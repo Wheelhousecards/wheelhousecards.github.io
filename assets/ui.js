@@ -28,7 +28,7 @@ export function payLine(c) {
    (from the old system) overrides both. */
 // Fixed splits for everyone (staff-only; customers never see a %). Fanatics Collect: 100% at $200 and up, 90% under $200.
 // A single card can still be given its own split from its detail view.
-// PC Sportscards: 80% of the sale price, unless the consignor has a preferred rate (pcsPct), or a drop-off / card is set by hand.
+// PC Sportscards: 80% of PC's payout after fees, unless the consignor has a preferred rate (pcsPct), or a drop-off / card is set by hand.
 export const SPLIT_DEFAULTS = { fanHi: 100, fanLo: 90, pcsRate: 80, rate: 100 };
 export const splitOf = (c, k) => k === "pcsRate" && c?.pcsPct != null && c.pcsPct !== "" && !isNaN(+c.pcsPct) ? +c.pcsPct : SPLIT_DEFAULTS[k];
 export const splitLine = () => "Fanatics Collect 100% at $200+, 90% under $200";
@@ -43,7 +43,7 @@ export function cardSplit(l, c) {
 export const FAN_RAW_FEE = 5;
 export const isUngraded = l => isRawGrade(l.grade) || /cgc\s*auth/i.test(l.title || "");
 export const cardFee = l => l.plat === "fan" && isUngraded(l) && l.net == null ? FAN_RAW_FEE : 0;
-export const cardPayout = (l, c) => { if (l.payout != null) return l.payout; const p = cardSplit(l, c); return p == null ? null : Math.max(0, (l.net != null && (l.plat !== "pcs" || c?.pcsBasis === "net") ? l.net : (l.price || 0)) - cardFee(l)) * p / 100; };
+export const cardPayout = (l, c) => { if (l.payout != null) return l.payout; const p = cardSplit(l, c); return p == null ? null : Math.max(0, (l.net != null && (l.plat !== "pcs" || c?.pcsBasis !== "sale") ? l.net : (l.price || 0)) - cardFee(l)) * p / 100; };
 const has = v => v != null && v !== "" && !isNaN(+v);
 // money for a share that may not be known yet
 export const shareText = (v, staff) => v == null ? (staff ? '<span class="need">Set PC %</span>' : '<span class="muted">Pending</span>') : money(v);
@@ -103,9 +103,9 @@ export function ebayFind(x) {
   return `https://www.ebay.com/sch/i.html?_nkw=${q}${PCS_SELLER ? `&_ssn=${encodeURIComponent(PCS_SELLER)}` : ""}${done ? "&LH_Sold=1&LH_Complete=1" : ""}${p}`;
 }
 export const itemPct = (x, lot, c) => has(x.split) ? +x.split : has(lot?.split) ? +lot.split : splitOf(c, "pcsRate");
-// What the PC % applies to: the sale price (standard) or, for special customers, what PC pays after their fees.
+// What the PC % applies to: PC's payout after their fees (standard), or the sale price for a customer/drop-off set that way.
 // Set per drop-off (lot.basis) or per customer (c.pcsBasis). Until PC reports its payout, a sale uses its price.
-export const pcsBasis = (lot, c) => lot?.basis || c?.pcsBasis || "sale";
+export const pcsBasis = (lot, c) => lot?.basis || c?.pcsBasis || "net";
 export const itemShare = (x, c, lot) => { const p = itemPct(x, lot, c); return p == null ? null : (pcsBasis(lot, c) === "net" && x.net != null ? x.net : (x.price || 0)) * p / 100; };
 export function dropoffSummary(items = []) {
   const n = k => items.filter(x => x.status === k).length;

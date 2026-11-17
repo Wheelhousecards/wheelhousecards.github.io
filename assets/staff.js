@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261117175737";
+import { db, logout } from "./firebase.js?v=20261117182619";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
-} from "./ui.js?v=20261117175737";
-import { setupGate, gateMarkup } from "./gate.js?v=20261117175737";
-import { emailSend, contact } from "./firebase-config.js?v=20261117175737";
+} from "./ui.js?v=20261117182619";
+import { setupGate, gateMarkup } from "./gate.js?v=20261117182619";
+import { emailSend, contact } from "./firebase-config.js?v=20261117182619";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -609,7 +609,7 @@ $("#custList").addEventListener("click", e => {
   if (ed) {
     const c = custById(ed); editingCust = ed;
     $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; 
-    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; $("#c-pcs").value = c.pcsPct ?? ""; $("#c-pcsbasis").value = c.pcsBasis || ""; syncPayHint();
+    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; $("#c-pcs").value = c.pcsPct ?? ""; $("#c-pcsbasis").value = c.pcsBasis === "sale" ? "sale" : ""; syncPayHint();
     $("#c-save").textContent = `Save ${c.code}`; $("#c-cancel").hidden = false; $("#c-msg").textContent = ""; $("#c-name").focus();
   }
 });
@@ -673,7 +673,7 @@ function openDropDetail(l) {
       <div class="f"><label for="dx-date">Dropped off</label><input id="dx-date" type="date" value="${v(l.dropDate)}"></div>
       <div class="f"><label for="dx-n">Cards dropped off</label><input id="dx-n" type="number" min="0" step="1" value="${l.expected || ""}"></div>
       <div class="f"><label for="dx-pct">Customer’s %</label><input id="dx-pct" type="number" step="0.5" min="0" max="100" value="${l.split ?? ""}" placeholder="${splitOf(custById(l.cust), "pcsRate")}% (their rate)"></div>
-      <div class="f"><label for="dx-basis">% is of</label><select id="dx-basis"><option value="">${custById(l.cust)?.pcsBasis === "net" ? "Their setting: PC’s payout after fees" : "Their setting: the sale price"}</option><option value="sale"${l.basis === "sale" ? " selected" : ""}>The sale price</option><option value="net"${l.basis === "net" ? " selected" : ""}>PC’s payout after fees</option></select></div>
+      <div class="f"><label for="dx-basis">% is of</label><select id="dx-basis"><option value="">${custById(l.cust)?.pcsBasis === "sale" ? "Their setting: the sale price" : "Their setting: PC’s payout after fees"}</option><option value="sale"${l.basis === "sale" ? " selected" : ""}>The sale price</option><option value="net"${l.basis === "net" ? " selected" : ""}>PC’s payout after fees</option></select></div>
       <div class="f"><label for="dx-batch">PC batch</label><select id="dx-batch"><option value="">No batch</option>${pcsBatches(l.cust).map(b => `<option value="${b.id}"${b.id === l.batch ? " selected" : ""}>Batch ${esc(b.id)}</option>`).join("")}</select></div>
       <div class="f w6"><label for="dx-cust">Customer</label><select id="dx-cust">${custOptions(l.cust)}</select></div>
       <div class="f w6"><div class="row"><button class="btn" type="submit">Save changes</button><span class="detect" id="dx-fmsg" role="status"></span></div></div>
