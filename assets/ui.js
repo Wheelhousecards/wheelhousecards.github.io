@@ -21,20 +21,22 @@ export function payLine(c) {
 // The consignor's share of one sale. Cards imported from the old system carry their exact portion.
 // PC Sportscards cards carry their payout after PC Sportscards' fees (net), but the consignor's split applies to the sale price.
 /* Payout splits, per card:
-   - Fanatics Collect: 100% when the card sells for $200 or more, 90% under $200.
+   - Fanatics Collect: 90% of the hammer price up to and including $200, 100% over $200.
    - PC Sportscards: a flat 95% of what PC Sportscards pays after its fees.
    - Anything else: the consignor's default split.
    A card's own split (set in its details) overrides the rule, and an exact consignor portion
    (from the old system) overrides both. */
-// Fixed splits for everyone (staff-only; customers never see a %). Fanatics Collect: 100% at $200 and up, 90% under $200.
+// Fixed splits for everyone (staff-only; customers never see a %). Fanatics Collect: 90% of the hammer price up to $200, 100% over $200.
+// A consignor can have their own Fanatics % (fanPct) that applies to all their Fanatics cards.
 // A single card can still be given its own split from its detail view.
 // PC Sportscards: 80% of PC's payout after fees, unless the consignor has a preferred rate (pcsPct), or a drop-off / card is set by hand.
 export const SPLIT_DEFAULTS = { fanHi: 100, fanLo: 90, pcsRate: 80, rate: 100 };
-export const splitOf = (c, k) => k === "pcsRate" && c?.pcsPct != null && c.pcsPct !== "" && !isNaN(+c.pcsPct) ? +c.pcsPct : SPLIT_DEFAULTS[k];
-export const splitLine = () => "Fanatics Collect 100% at $200+, 90% under $200";
+const pctSet = v => v != null && v !== "" && !isNaN(+v);
+export const splitOf = (c, k) => k === "pcsRate" && pctSet(c?.pcsPct) ? +c.pcsPct : (k === "fanHi" || k === "fanLo") && pctSet(c?.fanPct) ? +c.fanPct : SPLIT_DEFAULTS[k];
+export const splitLine = () => "Fanatics Collect 90% up to $200, 100% over $200";
 export function cardSplit(l, c) {
   if (l.split != null && l.split !== "") return +l.split;
-  if (l.plat === "fan") return (l.price || 0) >= 200 ? splitOf(c, "fanHi") : splitOf(c, "fanLo");
+  if (l.plat === "fan") return (l.price || 0) > 200 ? splitOf(c, "fanHi") : splitOf(c, "fanLo");
   if (l.plat === "pcs") return splitOf(c, "pcsRate");
   return splitOf(c, "rate");
 }

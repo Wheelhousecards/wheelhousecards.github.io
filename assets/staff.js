@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261118105134";
+import { db, logout } from "./firebase.js?v=20261118111718";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
-} from "./ui.js?v=20261118105134";
-import { setupGate, gateMarkup } from "./gate.js?v=20261118105134";
-import { emailSend, contact } from "./firebase-config.js?v=20261118105134";
+} from "./ui.js?v=20261118111718";
+import { setupGate, gateMarkup } from "./gate.js?v=20261118111718";
+import { emailSend, contact } from "./firebase-config.js?v=20261118111718";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -559,7 +559,7 @@ function fmtPhone(v) {
 }
 let editingCust = "";
 function resetCustForm() {
-  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable", "#c-pcs", "#c-pcsbasis"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; syncPayHint();
+  editingCust = ""; ["#c-name", "#c-email", "#c-phone", "#c-pay", "#c-payto", "#c-mail", "#c-payable", "#c-pcs", "#c-fanpct", "#c-pcsbasis"].forEach(s => { $(s).value = ""; }); $("#c-payable").value = "0"; syncPayHint();
   $("#c-save").textContent = "Add consignor"; $("#c-cancel").hidden = true;
 }
 $("#c-phone").addEventListener("blur", e => { e.target.value = fmtPhone(e.target.value); });
@@ -580,7 +580,9 @@ $("#custForm").addEventListener("submit", async e => {
   const pv = parseFloat($("#c-payable").value), payable = isNaN(pv) || pv < 0 ? 0 : Math.round(pv * 100) / 100;
   const pp = $("#c-pcs").value.trim(), pcsPct = pp === "" ? null : parseFloat(pp);
   if (pcsPct != null && (isNaN(pcsPct) || pcsPct < 0 || pcsPct > 100)) return say("PC Sportscards % must be between 0 and 100, or blank for the standard 80%.");
-  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, pcsPct, pcsBasis: $("#c-pcsbasis").value || null };
+  const fp = $("#c-fanpct").value.trim(), fanPct = fp === "" ? null : parseFloat(fp);
+  if (fanPct != null && (isNaN(fanPct) || fanPct < 0 || fanPct > 100)) return say("Fanatics % must be between 0 and 100, or blank for the standard 90% / 100%.");
+  const extra = { payMethod, payTo: payMethod === "venmo" && payTo && !payTo.startsWith("@") ? "@" + payTo : payTo, mailing, payable, pcsPct, fanPct, pcsBasis: $("#c-pcsbasis").value || null };
   $("#c-save").disabled = true;
   await guarded($("#c-msg"), async () => {
     if (editingCust) {
@@ -609,7 +611,7 @@ $("#custList").addEventListener("click", e => {
   if (ed) {
     const c = custById(ed); editingCust = ed;
     $("#c-name").value = c.name; $("#c-email").value = c.email || ""; $("#c-phone").value = c.phone || ""; 
-    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; $("#c-pcs").value = c.pcsPct ?? ""; $("#c-pcsbasis").value = c.pcsBasis === "sale" ? "sale" : ""; syncPayHint();
+    $("#c-pay").value = c.payMethod || ""; $("#c-payto").value = c.payTo || ""; $("#c-mail").value = c.mailing || ""; $("#c-payable").value = c.payable || 0; $("#c-pcs").value = c.pcsPct ?? ""; $("#c-fanpct").value = c.fanPct ?? ""; $("#c-pcsbasis").value = c.pcsBasis === "sale" ? "sale" : ""; syncPayHint();
     $("#c-save").textContent = `Save ${c.code}`; $("#c-cancel").hidden = false; $("#c-msg").textContent = ""; $("#c-name").focus();
   }
 });
@@ -1221,9 +1223,9 @@ $("#fa-body").addEventListener("change", async e => {
 (() => {
   const code = `(async()=>{const q=v=>'"'+String(v).replace(/"/g,'""')+'"',dl=(rows,name)=>{const b=new Blob([rows.join("\\n")],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name+"-"+new Date().toISOString().slice(0,10)+".csv";document.body.appendChild(a);a.click();a.remove();};
 const live=[...new Set([...document.querySelectorAll('a[href*="/weekly/"],a[href*="/premier/"],a[href*="/fixed/"],a[href*="/buy-now/"]')].map(a=>a.href.split("?")[0]))];
-if(live.length&&!/\\/share\\/vault\\//.test(location.pathname)){const rows=[["Card","Grade","Cert #","Link","Auction #","Lot","Auction ends","Price"].map(q).join(",")];let n=0;
-for(const l0 of live){const l="https://www.fanaticscollect.com"+new URL(l0).pathname;let r={};try{const u=(await(await fetch(location.origin+new URL(l).pathname,{credentials:"include"})).text()).replace(/\\\\"/g,'"'),g=re=>(u.match(re)||[])[1]||"";const e=g(/"auctionEndsAt":"([^"]+)"/);
-r=[(g(/<title>([^<]+)/).replace(/ on Fanatics Collect.*$/,"").replace(/ [|].*$/,"").replace(/&#x27;|&#39;/g,"'").replace(/&quot;/g,'"').replace(/&amp;/g,"&")),g(/"name":"Grade","value":"([^"]+)"/),g(/"name":"Certification number","value":"([^"]+)"/),l,g(/"shortName":"([A-Z]+\\d+)"/),g(/"lotString":"[A-Z]+\\d+ Lot: (\\d+)"/),e?new Date(e).toLocaleDateString("en-CA",{timeZone:"America/New_York"}):"",/\\/buy-now\\//.test(l)?g(/"offers":\\{[^}]*?"price":"?([\\d.]+)/):""];}catch(x){r=["","","",l,"","","",""];}
+if(live.length&&!/\\/share\\/vault\\//.test(location.pathname)){const rows=[["Card","Grade","Cert #","Link","Auction #","Lot","Auction ends","Price","Status","Sold date"].map(q).join(",")];let n=0;
+for(const l0 of live){const l="https://www.fanaticscollect.com"+new URL(l0).pathname;let r={};try{const u=(await(await fetch(location.origin+new URL(l).pathname,{credentials:"include"})).text()).replace(/\\\\"/g,'"'),g=re=>(u.match(re)||[])[1]||"";const e=g(/"auctionEndsAt":"([^"]+)"/),st=g(/"status":"(STATUS_[A-Z_]+)"/),sold=/SOLD/.test(st)&&!/UNSOLD/.test(st),cents=re=>{const v=g(re);return v?(+v/100).toFixed(2):""},sd=g(/"collectSales":\\[\\{[^\\]]*?"soldDate":"([^"]+)"/),day=x=>x?new Date(x).toLocaleDateString("en-CA",{timeZone:"America/New_York"}):"";
+r=[(g(/<title>([^<]+)/).replace(/ on Fanatics Collect.*$/,"").replace(/ [|].*$/,"").replace(/&#x27;|&#39;/g,"'").replace(/&quot;/g,'"').replace(/&amp;/g,"&")),g(/"name":"Grade","value":"([^"]+)"/),g(/"name":"Certification number","value":"([^"]+)"/),l,g(/"shortName":"([A-Z]+\\d+)"/),g(/"lotString":"[A-Z]+\\d+ Lot: (\\d+)"/),day(e),sold?(/\\/buy-now\\//.test(l)?cents(/"collectSales":\\[\\{[^\\]]*?"soldFor":\\{"__typename":"Money","amountInCents":(\\d+)/):cents(/"currentBid":\\{"__typename":"Money","amountInCents":(\\d+)/)):/\\/buy-now\\//.test(l)?g(/"offers":\\{[^}]*?"price":"?([\\d.]+)/):"",sold?"Sold":/UNSOLD|PASSED|NOT_SOLD/.test(st)?"Unsold":"Live",sold?day(sd||e):""];}catch(x){r=["","","",l,"","","","","",""];}
 rows.push(r.map(q).join(","));document.title="Grabbing "+(++n)+" of "+live.length+"…";}
 dl(rows,"fanatics-live-links");document.title="Downloaded "+live.length+" cards";return}
 const m=location.pathname.match(/\\/share\\/vault\\/([^/]+)/);if(!m){alert("Open Wheelhouse's live Fanatics auctions (or a share link) first, then click this bookmark.");return}
@@ -1759,7 +1761,9 @@ const FFIELDS = [
   { k: "grade", label: "Grade", re: /grade/i },
   { k: "period", label: "Auction # (from Grab Fanatics links)", re: /^auction ?#|^auction$|auction no/i },
   { k: "ends", label: "Auction ends", re: /^ends|end date|auction ends/i },
-  { k: "price", label: "Buy It Now price", re: /^(asking |buy it now |bin )?price$/i },
+  { k: "price", label: "Price (Buy It Now price, or the hammer price once sold)", re: /^(asking |buy it now |bin |hammer |sold |sale )?price$/i },
+  { k: "fstatus", label: "Status (Sold / Unsold / Live)", re: /^status$/i },
+  { k: "fsold", label: "Sold date", re: /^sold( date)?$|^date sold$/i },
 ];
 // Item export from the old consignment system (one row per card ever consigned).
 const HFIELDS = [
@@ -1973,11 +1977,17 @@ function planFan() {
     if (t) {
       used.add(t.id);
       if (!url) return { act: "skip", why: `No link yet (matches SKU ${t.sku})`, label };
-      const fresh = (period && period !== (t.period || "")) || (ends && ends !== (t.ends || "")) || (/\/buy-now\//i.test(url) && t.format !== "bin");
+      const fst = (g("fstatus") || "").toLowerCase(), soldNow = /^sold/.test(fst), unsoldNow = /unsold|not sold|passed/.test(fst);
+      const pr = parseFloat(g("price").replace(/[^0-9.]/g, "")), soldD = (g("fsold") || ends || "").slice(0, 10);
+      // Sold on Fanatics: the hammer price becomes the sale price (the customer's split comes from it). Already-paid cards are left alone.
+      const saleChange = !["paid", "archived", "removed", "returned"].includes(t.status) && ((soldNow && pr > 0 && (t.status !== "sold" || +t.price !== pr)) || (unsoldNow && t.status !== "unsold" && t.status !== "sold"));
+      const fresh = (period && period !== (t.period || "")) || (ends && ends !== (t.ends || "")) || (/\/buy-now\//i.test(url) && t.format !== "bin") || saleChange;
       if (t.url === url && !fresh) return { act: "skip", why: `Already linked (SKU ${t.sku})`, label };
-      const bin = /\/buy-now\//i.test(url), pr = parseFloat(g("price").replace(/[^0-9.]/g, ""));
+      const bin = /\/buy-now\//i.test(url);
       const patch = { url, item: d.item, plat: d.plat, ...(period ? { period } : {}), ...(ends ? { ends } : {}), ...(bin ? { format: "bin", period: t.period && !isAuctionNo(t.period) ? t.period : "BIN", ends: "" } : {}), ...(bin && pr > 0 ? { price: pr } : {}) };
       if (t.status === "curating") patch.status = "live";
+      if (saleChange && soldNow) Object.assign(patch, { status: "sold", price: pr, soldDate: soldD || today() });
+      else if (saleChange && unsoldNow) patch.status = "unsold";
       if (!digits(t.cert) && cert) patch.cert = cert;
       if ((!t.grade || t.grade === "Ungraded") && grade !== "Ungraded") patch.grade = grade;
       if (!custById(t.cust) && pick) { patch.cust = pick.cust; patch.custEmail = emailOf(pick.cust); patch.batch = pick.id; }
