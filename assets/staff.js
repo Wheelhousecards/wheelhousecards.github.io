@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261118103447";
+import { db, logout } from "./firebase.js?v=20261118105134";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
-} from "./ui.js?v=20261118103447";
-import { setupGate, gateMarkup } from "./gate.js?v=20261118103447";
-import { emailSend, contact } from "./firebase-config.js?v=20261118103447";
+} from "./ui.js?v=20261118105134";
+import { setupGate, gateMarkup } from "./gate.js?v=20261118105134";
+import { emailSend, contact } from "./firebase-config.js?v=20261118105134";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -796,7 +796,7 @@ function renderProfile(c, cards) {
         ${row("Inventory type", esc(c.invType || ""))}
       </dl></div>
       <div style="display:grid;gap:8px"><h3>Payouts</h3><dl class="dl">
-        ${row("Paid by", payLine(c) ? esc(payLine(c)) : '<span class="need">Not set</span>')}
+        ${row("Paid by", payLine(c) ? `<b>${esc(payLine(c))}</b>${c.payNote ? `<div class="cert">${esc(c.payNote)}</div>` : ""}` : `<span class="need">Not set</span> <button class="linkbtn" type="button" data-pf="edit">Add one</button><div class="cert">The payout email will ask them how they’d like to be paid.</div>`)}
         ${row("Mailing address", esc(c.mailing || ""))}
         ${row("Last emailed", c.notifiedAt ? `${fmtDay(c.notifiedAt.slice(0, 10))}${c.notifiedAmount != null ? ` (${money(c.notifiedAmount)})` : ""}` : "")}
         ${row("Old-system balance", c.balance ? money(c.balance) : "")}
@@ -1114,7 +1114,7 @@ function payoutEmail(c, o) {
     ...(c.payable ? [`Carried over from your previous balance: ${money(c.payable)}`, ""] : []),
     ...((o.deductions || []).length ? [...o.deductions.map(x => `- ${x.title}: sale reversed by buyer, −${money(x.reversal.amount)}`), ""] : []),
     `Total: ${money(o.amount)}`, "",
-    payLine(c) ? `We’ll send it by ${payLine(c)}. If that’s changed, just reply and let us know.` : "How would you like to be paid: Venmo, PayPal or check? Reply with your handle, PayPal email or mailing address.",
+    payLine(c) ? `You can expect your payment from Wheelhouse shortly by ${payLine(c)}.` : "How would you like to be paid: Venmo, PayPal or check? Reply with your handle, PayPal email or mailing address.",
     "", `You can see all your cards, sales and payouts anytime at ${SITE}`, "", "Thanks,", "Wheelhouse",
   ].join("\n");
   return { subject: `Your Wheelhouse consignment ${label}: ${money(o.amount)}`, body };
