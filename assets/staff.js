@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261117182619";
+import { db, logout } from "./firebase.js?v=20261118103447";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,9 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
-} from "./ui.js?v=20261117182619";
-import { setupGate, gateMarkup } from "./gate.js?v=20261117182619";
-import { emailSend, contact } from "./firebase-config.js?v=20261117182619";
+} from "./ui.js?v=20261118103447";
+import { setupGate, gateMarkup } from "./gate.js?v=20261118103447";
+import { emailSend, contact } from "./firebase-config.js?v=20261118103447";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -2001,6 +2001,8 @@ function planFan() {
 }
 function pcsStatus(st) {
   st = st.toLowerCase();
+  // Unsold first, so "Not Sold" / "Did Not Sell" never reads as a sale. Unsold cards pay $0 to everyone.
+  if (/unsold|not sold|did ?n.?t sell|no sale|no bids|ended without|expired/.test(st)) return "unsold";
   if (/received payment|paid/.test(st)) return "received";
   if (/cancel|return/.test(st)) return "cancelled";
   if (/sold/.test(st) && !/unsold/.test(st)) return "awaiting";
