@@ -1,9 +1,10 @@
 // Customer portal: sign in by email link, then see only your own cards and batches.
-import { db, logout } from "./firebase.js?v=20261124115625";
+import { db, logout } from "./firebase.js?v=20261124122525";
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261124115625";
-import { setupGate, gateMarkup } from "./gate.js?v=20261124115625";
-import { contact, emailSend } from "./firebase-config.js?v=20261124115625";
+import { $, esc, mountDashboard, createLightbox } from "./ui.js?v=20261124122525";
+import { setupGate, gateMarkup } from "./gate.js?v=20261124122525";
+import { contact, emailSend } from "./firebase-config.js?v=20261124122525";
+import { layout, btn, small, STAFF_SITE } from "./mail.js?v=20261124122525";
 
 const views = ["gate", "loading", "none", "dash"];
 const show = v => views.forEach(id => { $("#" + id).hidden = id !== v; });
@@ -27,10 +28,13 @@ function notifyStaff(l, c, price, min) {
   const who = c ? `${c.name} (${c.code})` : me;
   const message = [`${who} sent an asking price for a Buy It Now card.`, "",
     `Card: ${l?.title || ""}`, `SKU: ${l?.sku || ""}`, `Asking price: ${money2(price)}`, `Minimum offer: ${min != null ? money2(min) : "No offers"}`, "",
-    "List it on Fanatics at that price, then set it to Live in the staff app:", "https://wheelhousecards.github.io/consignment/staff"].join("\n");
+    "List it on Fanatics as a Buy It Now at that price, then click Mark listed in the staff app:", STAFF_SITE].join("\n");
+  const html = layout({ head: `${who} sent an asking price`, big: money2(price), sub: min != null ? `Minimum offer ${money2(min)}` : "No offers",
+    body: `<p style="margin:0 0 12px">${esc(l?.title || "")}<br><span style="font-size:13px;color:#5b616b">SKU ${esc(l?.sku || "")}</span></p><p style="margin:0 0 12px">List it on Fanatics as a Buy It Now at this price, then click <b>Mark listed</b> in the staff app.</p>` + btn("Open the staff app", STAFF_SITE),
+    foot: ["Internal notice from the consignment site. Replying goes to the customer."] });
   fetch("https://api.emailjs.com/api/v1.0/email/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
     service_id: emailSend.serviceId, template_id: emailSend.templateId, user_id: emailSend.publicKey,
-    template_params: { to_email: contact.email, to_name: "Wheelhouse Consignment", subject: `Asking price: SKU ${l?.sku || ""} · ${c?.name || me} · ${money2(price)}`, message, reply_to: c?.email || me, bcc: "" } }) }).catch(() => {});
+    template_params: { to_email: contact.email, to_name: "Wheelhouse Consignment", subject: `Asking price: SKU ${l?.sku || ""} · ${c?.name || me} · ${money2(price)}`, message, html, reply_to: c?.email || me, bcc: "" } }) }).catch(() => {});
 }
 createLightbox(
   id => {

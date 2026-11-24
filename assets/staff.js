@@ -1,5 +1,5 @@
 // Staff app: consignors, listings, batches, imports and bulk edits, all synced live through Firestore.
-import { db, logout } from "./firebase.js?v=20261124115625";
+import { db, logout } from "./firebase.js?v=20261124122525";
 import {
   collection, doc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit,
   writeBatch, runTransaction, setDoc, updateDoc, deleteDoc, serverTimestamp
@@ -10,9 +10,10 @@ import {
   isLot, lotLine, cardDetailHtml, createModal, loadFullPhoto, cardPayout,
   isDropoff, ITEM_STAT, dropoffSummary, itemShare, itemPct, shareText, cardSplit, splitLine, splitOf, askMinText,
   statementHtml, monthLabel, monthKey, monthEnd, lastMonthKey, auctionOver
-} from "./ui.js?v=20261124115625";
-import { setupGate, gateMarkup } from "./gate.js?v=20261124115625";
-import { emailSend, contact } from "./firebase-config.js?v=20261124115625";
+} from "./ui.js?v=20261124122525";
+import { setupGate, gateMarkup } from "./gate.js?v=20261124122525";
+import { emailSend, contact } from "./firebase-config.js?v=20261124122525";
+import { layout, rateNotes, btn, small, box, stmtTable, cardList, questions, textNotes } from "./mail.js?v=20261124122525";
 
 /* ---------- state ---------- */
 // Cards still in play (being curated, live, sold-unpaid, unsold) stay synced live. Paid-out and returned
@@ -313,13 +314,20 @@ function renderAskAlert() {
 }
 function priceRequestEmail(c, ls) {
   const first = (c.name || "").split(/\s+/)[0] || "there", n = ls.length;
-  return { subject: `Your asking price for ${n === 1 ? "1 card" : `${n} cards`} · Wheelhouse Consignment`, body: [
+  const notes = rateNotes(c, ["fan"], { only: "bin" }).filter(x => !/^Proceeds/.test(x));
+  const html = note => layout({ greet: `Hi ${first}!`, head: `${n === 1 ? "One of your cards is" : `${n} of your cards are`} ready to list as a Buy It Now. We just need your asking price.`, note,
+    body: cardList(ls.map(l => ({ sku: l.sku, title: `${l.title}${l.grade && l.grade !== "Ungraded" ? ` · ${l.grade}` : ""}` })))
+      + `<p style="margin:0 0 12px">Sign in to your customer portal, open ${n === 1 ? "the card" : "each card"} and enter your asking price. You can add a minimum offer if you’d take offers, and ${n === 1 ? "the card links" : "each card links"} to what it has recently sold for on eBay.</p>`
+      + btn(n === 1 ? "Set your price" : "Set your prices", SITE) + small(`wheelhousecards.github.io/consignment<br>Sign in with this email address (${esc(c.email)}). The first time, choose “Create account” with that same email.`)
+      + `<p style="margin:0 0 12px">If it’s easier, just reply to this email with your prices.</p>`,
+    notes, foot: [questions()] });
+  return { subject: `${first === "there" ? "What" : `${first}, what`} would you like to ask for ${n === 1 ? "your card" : `${n} of your cards`}?`, html, body: [
     `Hi ${first},`, "",
     `We’re getting ready to list ${n === 1 ? "one of your cards" : `${n} of your cards`} as a Buy It Now on Fanatics Collect, and we’d like your asking price${n === 1 ? "" : " for each"}:`, "",
     ...ls.map(l => `- SKU ${l.sku} · ${l.title}${l.grade && l.grade !== "Ungraded" ? ` (${l.grade})` : ""}`), "",
     `To set your price, sign in to your Wheelhouse customer portal at ${SITE}, open ${n === 1 ? "the card" : "each card"} and enter your asking price. You can add a minimum offer if you’d take offers. Each card also links to what it has recently sold for on eBay.`, "",
     `Sign in with this email address (${c.email}). The first time, choose “Create account” with that same email.`, "",
-    "If it’s easier, just reply to this email with your prices.", "", "Thanks,", "Wheelhouse"].join("\n") };
+    "If it’s easier, just reply to this email with your prices.", ...textNotes("Please note:", notes), "", "Thanks,", "Wheelhouse"].join("\n") };
 }
 $("#ask-alert").addEventListener("click", async e => {
   if (e.target.dataset.askReq) {
@@ -1119,7 +1127,21 @@ function payoutEmail(c, o) {
     payLine(c) ? `You can expect your payment from Wheelhouse shortly by ${payLine(c)}.` : "How would you like to be paid: Venmo, PayPal or check? Reply with your handle, PayPal email or mailing address.",
     "", `You can see all your cards, sales and payouts anytime at ${SITE}`, "", "Thanks,", "Wheelhouse",
   ].join("\n");
-  return { subject: `Your Wheelhouse consignment ${label}: ${money(o.amount)}`, body };
+  const plats = [...new Set(lines.map(x => x.plat))], notes = rateNotes(c, plats, { calc: true });
+  const rows = plats.flatMap(g => [{ group: PLAT[g] || g }, ...lines.filter(x => x.plat === g).map(x => x.kind === "drop"
+    ? { title: `${x.title} · ${x.n} card${x.n === 1 ? "" : "s"} sold`, sku: x.sku, sold: when(x), sale: money(x.price), amt: money(x.amt) }
+    : { title: x.title, sku: x.sku, sold: when(x), sale: `${money(x.price)}${x.fee ? `<br><span style="font-size:11px;color:#5b616b">−${money(x.fee)} fee</span>` : ""}`, amt: money(x.amt) })]);
+  if (c.payable) rows.push({ title: "Carried over from your previous balance", amt: money(c.payable) });
+  (o.deductions || []).forEach(x => rows.push({ title: `${x.title}: sale reversed by buyer`, amt: `−${money(x.reversal.amount)}` }));
+  const mon = o.month ? monthLabel(o.month) : "";
+  const pay = payLine(c) ? box("You can expect your payment from Wheelhouse shortly", `by ${esc(payLine(c))}`)
+    : box("How would you like to be paid?", "Reply to this email with your Venmo handle, PayPal email or a mailing address for a check, and we’ll send your payment.");
+  const html = note => layout({ greet: `Good news, ${first}!`, head: `Your ${mon ? mon + " " : ""}consignment payout is ${payLine(c) ? "on its way" : "ready"}.`, big: money(o.amount), note,
+    body: (payLine(c) ? "" : pay) + `<p style="margin:0 0 12px">${mon ? `Here’s everything that sold in ${esc(mon)}:` : "Here’s what it covers:"}</p>` + stmtTable(rows, money(o.amount))
+      + (payLine(c) ? pay : "") + btn("See your cards and payouts", SITE) + small("wheelhousecards.github.io/consignment"),
+    notesTitle: "How this was calculated:", notes, foot: [questions("Questions about this payout?")] });
+  const subject = `Your Wheelhouse ${mon ? mon + " " : "consignment "}payout: ${money(o.amount)}${payLine(c) ? "" : " · how would you like to be paid?"}`;
+  return { subject, html, body: body.replace(/\n\nThanks,\nWheelhouse$/, () => [...textNotes("How this was calculated:", notes), "", "Thanks,", "Wheelhouse"].join("\n")) };
 }
 /* Payout email: preview, edit, approve and send from here. Sends through EmailJS when it's set up. */
 const mailBox = createModal();
@@ -1129,16 +1151,23 @@ function openMail(c, o, m, { title = "Payout email", photo = null, onSent = null
     <h2>${esc(title)} to ${esc(c.name)}</h2>
     <div class="f"><label>To</label><div class="code">${esc(c.email)}</div></div>
     <div class="f"><label for="pm-subj">Subject</label><input id="pm-subj" value="${esc(m.subject)}"></div>
-    <div class="f"><label for="pm-body">Message</label><textarea id="pm-body" rows="14" style="font:inherit;padding:10px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box">${esc(m.body)}</textarea></div>
+    ${m.html ? `<div class="f"><label for="pm-note">Personal note <span class="muted">(optional, appears near the top)</span></label><textarea id="pm-note" rows="2" style="font:inherit;padding:8px 10px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box" placeholder="e.g. Great meeting you at Wayne on Saturday!"></textarea></div>
+    <div class="f"><label>Preview</label><iframe id="pm-prev" title="Email preview" style="width:100%;height:440px;border:1px solid #ccc;border-radius:6px;background:#e9ebee"></iframe></div>
+    <details><summary class="muted" style="cursor:pointer;font-size:13px">Plain-text version</summary>` : ""}
+    <div class="f"><label for="pm-body">${m.html ? "Plain text (used by “Open in email app”, and as a backup)" : "Message"}</label><textarea id="pm-body" rows="14" style="font:inherit;padding:10px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box">${esc(m.body)}</textarea></div>${m.html ? "</details>" : ""}
     ${photo ? `<div class="f"><label>${emailSend.attachments ? "Attached photo" : "Drop-off photo (not attached)"}</label><img src="${photo}" alt="Receipt photo" style="max-width:240px;border-radius:6px;border:1px solid #ddd">${emailSend.attachments ? "" : '<span class="muted" style="font-size:13px">Photo attachments need a paid EmailJS plan, so this email goes without it. The customer can see their drop-off photos in their portal.</span>'}</div>` : ""}
     ${canSend() ? "" : '<div class="notice"><b>Sending from the app isn’t set up yet.</b><span>Until it is, “Open in email app” hands this message to your email program.</span></div>'}
     <div class="row">${canSend() ? '<button class="btn" type="button" id="pm-send">Approve and send</button>' : '<button class="btn" type="button" id="pm-open">Open in email app</button>'}<button class="btn ghost" type="button" id="pm-cancel">Cancel</button><span class="detect" id="pm-msg" role="status"></span></div>
   </div>`);
   const body = mailBox.body, val = s => $(s, body).value;
+  const note = () => ($("#pm-note", body)?.value || "").trim();
+  const text = () => note() ? val("#pm-body").replace(/^(.*?\n\n)/, `$1${note()}\n\n`) : val("#pm-body");
+  const prev = () => { const f = $("#pm-prev", body); if (f) f.srcdoc = m.html(note()); };
+  prev(); $("#pm-note", body)?.addEventListener("input", prev);
   const logged = onSent || (() => updateDoc(doc(db, "customers", c.id), { notifiedAt: now(), notifiedAmount: Math.round(o.amount * 100) / 100 }));
   $("#pm-cancel", body).addEventListener("click", () => mailBox.close());
   $("#pm-open", body)?.addEventListener("click", async () => {
-    location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(val("#pm-subj"))}&body=${encodeURIComponent(val("#pm-body"))}`;
+    location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(val("#pm-subj"))}&body=${encodeURIComponent(text())}`;
     mailBox.close(); await guarded($(out), logged); $(out).textContent = `Opened an email to ${c.email} in your email app.${photo ? " Attach the photo yourself; your email app can’t receive it from here." : ""}`;
   });
   $("#pm-send", body)?.addEventListener("click", async e => {
@@ -1147,7 +1176,7 @@ function openMail(c, o, m, { title = "Payout email", photo = null, onSent = null
     try {
       const r = await fetch("https://api.emailjs.com/api/v1.0/email/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         service_id: emailSend.serviceId, template_id: emailSend.templateId, user_id: emailSend.publicKey,
-        template_params: { to_email: c.email, to_name: c.name, subject: val("#pm-subj"), message: val("#pm-body"), reply_to: contact.email, bcc: contact.email, ...(emailSend.attachments ? { photo: photo || "" } : {}) } }) });
+        template_params: { to_email: c.email, to_name: c.name, subject: val("#pm-subj"), message: text(), ...(m.html ? { html: m.html(note()) } : {}), reply_to: contact.email, bcc: contact.email, ...(emailSend.attachments ? { photo: photo || "" } : {}) } }) });
       if (!r.ok) throw new Error(await r.text());
       mailBox.close(); await guarded($(out), logged); $(out).textContent = `Sent the email to ${c.name} (${c.email}).`;
     } catch (err) { console.error(err); btn.disabled = false; say("Couldn’t send it. Check your connection and try again, or use Copy message."); }
@@ -1185,7 +1214,20 @@ async function openReceipt(b, { lot = null } = {}) {
     `As each card is listed and sold, the portal shows its status, the sale price and what you’ll receive.${photo || (b.photos || []).length ? " Your drop-off photos are there too." : ""} Please allow some time for curation.`, "",
     `To sign in, use this email address (${c.email}). The first time, choose “Create account” with that same email.`, "",
     "Thanks,", "Wheelhouse"].filter(x => x !== null).join("\n");
-  openMail(c, null, { subject: `Wheelhouse consignment receipt: ${b.id ? `batch ${b.id}` : `SKU ${lot?.sku || ""}`}`, body }, {
+  const n = b.cards || 0, ref = b.id ? `batch ${b.id}` : `SKU ${lot?.sku || ""}`, plat = b.plat || "fan";
+  const accepted = n ? `${n === 1 ? "1 of your cards" : `${n} of your cards`}` : "your cards";
+  const where = plat === "fan" ? "will be listed for sale on <b>Fanatics Collect</b> as soon as possible"
+    : plat === "pcs" ? "will be sent to our partner <b>PC Sportscards</b> and listed in their eBay auctions as soon as possible"
+    : plat === "store" ? "will be offered for sale in Wheelhouse stores as soon as possible"
+    : `will be listed for sale through <b>${esc(PLAT[plat] || "our auction partners")}</b> as soon as possible`;
+  const notes = rateNotes(c, [plat], { basis: lot?.basis });
+  const hasPhotos = !!(photo || (b.photos || []).length);
+  const html = note => layout({ greet: `It’s a great day, ${first}!`, head: `Wheelhouse has accepted ${accepted} into consignment!`, note,
+    body: `<p style="margin:0 0 12px">The cards you brought Wheelhouse to consign on ${esc(fmtDay(b.recv))} ${where}. Please allow some time for curation.</p>`
+      + `<p style="margin:0 0 12px">You can follow every card in your Wheelhouse customer portal. As each one is listed and sold, you’ll see its status, the sale price and what you’ll receive.${hasPhotos ? " Your drop-off photos are there too." : ""}</p>`
+      + btn("View your cards", SITE) + small(`wheelhousecards.github.io/consignment<br>Sign in with this email address (${esc(c.email)}). The first time, choose “Create account” with that same email.`),
+    notes, foot: [`Receipt for ${esc(ref)}${n ? ` · ${n} card${n === 1 ? "" : "s"}` : ""} · received ${esc(fmtDay(b.recv))}`, questions()] });
+  openMail(c, null, { subject: `Wheelhouse has accepted ${accepted} into consignment`, html, body: body.replace(/\n\nThanks,\nWheelhouse$/, () => [...textNotes("Please note:", notes), "", `Receipt for ${ref}`, "", "Thanks,", "Wheelhouse"].join("\n")) }, {
     title: "Receipt email", photo, out: lot ? "#dx-msg" : "#b-msg",
     onSent: () => b.id ? updateDoc(doc(db, "batches", b.id), { receiptAt: now() }) : updateDoc(listingRef(lot.id), { receiptAt: now() }),
   });
